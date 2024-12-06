@@ -1,0 +1,31 @@
+{
+  "name": "@brdev/tweet-at-bsky",
+  "version": "1.0.0",
+  "description": "Capture Tweets in Bluesky",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "node --env-file .env.local index.js",
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dbrobbins/tweet-at-bsky.git"
+  },
+  "keywords": [
+    "bsky"
+  ],
+  "author": "dbrobbins",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/dbrobbins/tweet-at-bsky/issues"
+  },
+  "homepage": "https://github.com/dbrobbins/tweet-at-bsky#readme",
+  "dependencies": {
+    "@atproto/api": "^0.13.18"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1"
+  }
+}
