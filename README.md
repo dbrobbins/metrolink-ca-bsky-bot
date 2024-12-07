@@ -15,9 +15,10 @@ You'll need `typescript`:
 You'll need to configure a local `.env.local` containing the following:
 
 ```
+SERVICE_URL=
+RUN_INTERVAL_MINUTES=5
 DATA_REQUEST_ENABLED=false
 POSTING_ENABLED=false
-SERVICE_URL=
 BLUESKY_ID=
 BLUESKY_PASS=
 ```

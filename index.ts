@@ -1,22 +1,26 @@
 import { AtpAgent } from "@atproto/api";
 import { RESPONSE } from './test';
+import * as util from './util';
 import { AdvisoryPost, Lines, LineServiceAdvisory, TYPE_SERVICE_ADVISORY } from './types';
 
-const RUN_INTERVAL_MINUTES = 1;
+const RUN_INTERVAL_MINUTES: number = process.env.RUN_INTERVAL_MINUTES ? parseInt(process.env.RUN_INTERVAL_MINUTES) : 30;
 const RUN_INTERVAL_MS = RUN_INTERVAL_MINUTES * 60 * 1000;
+// TODO externalize to config
 const LINES_TO_POST = [Lines.IEOC.externalId]
-
-const agent = new AtpAgent({ service: 'https://bsky.social' });
 
 const serviceUrl: string = process.env.SERVICE_URL ?? '';
 const dataRequestEnabled: boolean = process.env.DATA_REQUEST_ENABLED === 'true';
 // only post if we're also getting real data
 const postingEnabled: boolean = dataRequestEnabled && process.env.POSTING_ENABLED === 'true';
 
+const agent = new AtpAgent({ service: 'https://bsky.social' });
 let knownPostedIds: number[] = [];
+let isOnline = false;
 
 const postedInIntervalMs = (timestamp: string, intervalMs: number): boolean => {
-    const now = new Date();
+    // timezone-adjusted now
+    const now = util.getPtNow();
+    // post date already timezone-adjusted
     const postDate = new Date(timestamp);
 
     const intervalEnd = now.getTime();
@@ -108,7 +112,36 @@ const postAll = async (posts: AdvisoryPost[]): Promise<number[]> => {
     }
 }
 
-async function main() {
+function online() {
+    const now = util.getPtNow();
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    const currentDay = now.getDay();
+
+    // Sat / Sun 6a-11p
+    if (currentDay === 6 || currentDay === 0) {
+        return currentHour >= 6 && currentHour < 23;
+    }
+
+    // Mon-Fri 4a-11:30p
+    return currentHour >= 4 && !(currentHour === 23 && currentMinute > 30)
+}
+
+function main() {
+    // don't make requests when things aren't getting posted
+    if (!online()) {
+        if (isOnline) {
+            isOnline = false;
+            console.log('going offline...');
+        }
+        return;
+    }
+
+    if (!isOnline) {
+        isOnline = true;
+        console.log('coming online...');
+    }
+
     try {
         getServiceAdvisories()
             .then(json => getPostsFromAdvisories(json as LineServiceAdvisory[]))
