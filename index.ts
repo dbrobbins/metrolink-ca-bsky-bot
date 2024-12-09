@@ -20,11 +20,16 @@ const linesToPost = (() => {
 
     return toPost;
 })();
+console.info('lines to post', linesToPost);
 const serviceUrl: string = process.env.SERVICE_URL ?? '';
+console.info('service url', serviceUrl);
 const serviceUrlWithQuery = serviceUrl + '?lines=' + linesToPost.join('&lines=');
+console.info('service url with query', serviceUrlWithQuery);
 const dataRequestEnabled: boolean = process.env.DATA_REQUEST_ENABLED === 'true';
+console.info('data request enabled', dataRequestEnabled);
 // only post if we're also getting real data
 const postingEnabled: boolean = dataRequestEnabled && process.env.POSTING_ENABLED === 'true';
+console.info('posting enabled', postingEnabled);
 
 const agent = new AtpAgent({ service: 'https://bsky.social' });
 let knownPostedIds: number[] = [];
@@ -46,7 +51,7 @@ const postedInIntervalMs = (timestamp: string, intervalMs: number): boolean => {
 const getServiceAdvisories = (): Promise<any> => {
     // if using local env then return a promise that resolves our test data
     if (!dataRequestEnabled) {
-        console.log('using local data');
+        console.info('using local data');
         return new Promise(resolve => resolve(JSON.parse(RESPONSE)));
     }
 
@@ -97,7 +102,7 @@ const postAll = async (posts: AdvisoryPost[]): Promise<number[]> => {
     if (!postingEnabled) {
         return new Promise(resolve => {
             resolve(posts.map(post => {
-                console.log('pretend posting', post.message);
+                console.info('pretend posting', post.message);
                 return post.id;
             }));
         });
@@ -116,6 +121,7 @@ const postAll = async (posts: AdvisoryPost[]): Promise<number[]> => {
         return Promise.all(posts.map(post => {
             return agent.post({ text: post.message })
                 .then((response) => {
+                    console.info('posted', post.message);
                     return post.id;
                 });
         }))
@@ -145,14 +151,14 @@ function main() {
     if (!online()) {
         if (isOnline) {
             isOnline = false;
-            console.log('going offline...');
+            console.info('going offline...');
         }
         return;
     }
 
     if (!isOnline) {
         isOnline = true;
-        console.log('coming online...');
+        console.info('coming online...');
     }
 
     try {
