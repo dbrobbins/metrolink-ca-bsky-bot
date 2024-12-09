@@ -1,10 +1,12 @@
-import { AtpAgent } from "@atproto/api";
+import { AtpAgent, AtpSessionData, AtpSessionEvent } from "@atproto/api";
 import { RESPONSE } from './test';
 import * as util from './util';
 import { AdvisoryPost, Lines, LineServiceAdvisory, TYPE_SERVICE_ADVISORY } from './types';
 
 const RUN_INTERVAL_MINUTES: number = process.env.RUN_INTERVAL_MINUTES ? parseInt(process.env.RUN_INTERVAL_MINUTES) : 30;
 const RUN_INTERVAL_MS = RUN_INTERVAL_MINUTES * 60 * 1000;
+
+const logger: util.Logger = new util.Logger(process.env.LOG_LEVEL);
 
 const linesToPost = (() => {
     let toPost: string[] = [];
@@ -20,18 +22,25 @@ const linesToPost = (() => {
 
     return toPost;
 })();
-console.info('lines to post', linesToPost);
+logger.info('lines to post', linesToPost);
 const serviceUrl: string = process.env.SERVICE_URL ?? '';
-console.info('service url', serviceUrl);
+logger.info('service url', serviceUrl);
 const serviceUrlWithQuery = serviceUrl + '?lines=' + linesToPost.join('&lines=');
-console.info('service url with query', serviceUrlWithQuery);
+logger.info('service url with query', serviceUrlWithQuery);
 const dataRequestEnabled: boolean = process.env.DATA_REQUEST_ENABLED === 'true';
-console.info('data request enabled', dataRequestEnabled);
+logger.info('data request enabled', dataRequestEnabled);
 // only post if we're also getting real data
 const postingEnabled: boolean = dataRequestEnabled && process.env.POSTING_ENABLED === 'true';
-console.info('posting enabled', postingEnabled);
+logger.info('posting enabled', postingEnabled);
 
-const agent = new AtpAgent({ service: 'https://bsky.social' });
+let atpSessionData: AtpSessionData | undefined = undefined;
+const agent = new AtpAgent({
+    service: 'https://bsky.social',
+    persistSession: (event: AtpSessionEvent, session?: AtpSessionData) => {
+        session = session;
+        logger.debug('session persisted in memory');
+    }
+});
 let knownPostedIds: number[] = [];
 let isOnline = false;
 
@@ -51,7 +60,7 @@ const postedInIntervalMs = (timestamp: string, intervalMs: number): boolean => {
 const getServiceAdvisories = (): Promise<any> => {
     // if using local env then return a promise that resolves our test data
     if (!dataRequestEnabled) {
-        console.info('using local data');
+        logger.warn('using local data');
         return new Promise(resolve => resolve(JSON.parse(RESPONSE)));
     }
 
@@ -59,11 +68,13 @@ const getServiceAdvisories = (): Promise<any> => {
         throw new Error('env has no service url configured');
     }
 
+    logger.debug('fetching data');
+
     // plain GET, no options needed
     return fetch(serviceUrlWithQuery)
         .then(response => response.json())
         .catch(error => {
-            console.error('failed to fetch advisories');
+            logger.error('failed to fetch advisories');
             throw error;
         });
 }
@@ -108,7 +119,13 @@ const postAll = async (posts: AdvisoryPost[]): Promise<number[]> => {
         }
 
         if (postingEnabled) {
-            await agent.login({ identifier: id, password: pass });
+            if (atpSessionData) {
+                logger.debug('resuming session');
+                await agent.resumeSession(atpSessionData);
+            } else {
+                logger.debug('logging in');
+                await agent.login({ identifier: id, password: pass });
+            }
         }
 
         return Promise.all(posts.map(async (post, index) => {
@@ -116,18 +133,20 @@ const postAll = async (posts: AdvisoryPost[]): Promise<number[]> => {
             await new Promise(resolve => setTimeout(resolve, 500 * index));
 
             if (postingEnabled) {
+                logger.debug('attempting to post', post.message);
                 return agent.post({ text: post.message })
                     .then((response) => {
-                        console.info('posted', post.message);
+                        logger.debug('post response', response);
+                        logger.info('posted', post.message);
                         return post.id;
                     });
             }
 
-            console.info('pretend posting', post.message);
+            logger.warn('pretend posting', post.message);
             return post.id;
         }))
     } catch (error) {
-        console.error('failed to post advisories');
+        logger.error('failed to post advisories');
         throw error;
     }
 }
@@ -152,26 +171,35 @@ function main() {
     if (!online()) {
         if (isOnline) {
             isOnline = false;
-            console.info('going offline...');
+            logger.info('going offline...');
         }
         return;
     }
 
     if (!isOnline) {
         isOnline = true;
-        console.info('coming online...');
+        logger.info('coming online...');
     }
 
     try {
         getServiceAdvisories()
-            .then(json => getPostsFromAdvisories(json as LineServiceAdvisory[]))
-            .then(posts => postAll(posts))
-            .then(postedIds => postedIds.forEach(id => knownPostedIds.push(id)));
+            .then(json => {
+                console.debug('response json', json);
+                return getPostsFromAdvisories(json as LineServiceAdvisory[]);
+            })
+            .then(posts => {
+                console.debug('posting all', posts);
+                return postAll(posts);
+            })
+            .then(postedIds => {
+                console.debug('marking posted', postedIds);
+                postedIds.forEach(id => knownPostedIds.push(id));
+            });
     } catch (e) {
         if (e instanceof Error) {
-            console.error(e.message);
+            logger.error(e.message);
         } else {
-            console.error(e);
+            logger.error(e);
         }
     }
 }
@@ -181,5 +209,5 @@ main();
 if (linesToPost.length > 0) {
     setInterval(main, RUN_INTERVAL_MS);
 } else {
-    console.error('env has empty set of lines to post');
+    logger.error('env has empty set of lines to post');
 }
