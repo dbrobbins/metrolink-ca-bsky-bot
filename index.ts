@@ -41,6 +41,7 @@ const agent = new AtpAgent({
         logger.debug('session persisted in memory');
     }
 });
+let loopCount = 0;
 let knownPostedIds: number[] = [];
 let isOnline = false;
 
@@ -69,6 +70,7 @@ const getServiceAdvisories = (): Promise<any> => {
     }
 
     logger.debug('fetching data');
+    loopCount += 1;
 
     // plain GET, no options needed
     return fetch(serviceUrlWithQuery)
@@ -167,6 +169,9 @@ function online() {
 }
 
 function main() {
+    logger.info('loop count', loopCount);
+    logger.info('post count', knownPostedIds.length);
+
     // don't make requests when things aren't getting posted
     if (!online()) {
         if (isOnline) {
@@ -184,15 +189,18 @@ function main() {
     try {
         getServiceAdvisories()
             .then(json => {
-                console.debug('response json', json);
-                return getPostsFromAdvisories(json as LineServiceAdvisory[]);
+                console.debug('data fetch response', json);
+                const lineAdvisories = json as LineServiceAdvisory[];
+                console.info('received advisories for lines', lineAdvisories.map(lineAdvisory => lineAdvisory.LineAbbreviation).join(','));
+                return getPostsFromAdvisories(lineAdvisories);
             })
             .then(posts => {
                 console.debug('posting all', posts);
+                console.info('posting count', posts.length);
                 return postAll(posts);
             })
             .then(postedIds => {
-                console.debug('marking posted', postedIds);
+                console.info('marking posted', postedIds);
                 postedIds.forEach(id => knownPostedIds.push(id));
             });
     } catch (e) {
