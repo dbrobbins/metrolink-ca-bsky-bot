@@ -99,15 +99,6 @@ const getPostsFromAdvisories = (lineServiceAdvisories: LineServiceAdvisory[]): A
 }
 
 const postAll = async (posts: AdvisoryPost[]): Promise<number[]> => {
-    if (!postingEnabled) {
-        return new Promise(resolve => {
-            resolve(posts.map(post => {
-                console.info('pretend posting', post.message);
-                return post.id;
-            }));
-        });
-    }
-
     try {
         const id = process.env.BLUESKY_ID;
         const pass = process.env.BLUESKY_PASS;
@@ -116,14 +107,24 @@ const postAll = async (posts: AdvisoryPost[]): Promise<number[]> => {
             throw new Error('env has no id or no pass');
         }
 
-        await agent.login({ identifier: id, password: pass });
+        if (postingEnabled) {
+            await agent.login({ identifier: id, password: pass });
+        }
 
-        return Promise.all(posts.map(post => {
-            return agent.post({ text: post.message })
-                .then((response) => {
-                    console.info('posted', post.message);
-                    return post.id;
-                });
+        return Promise.all(posts.map(async (post, index) => {
+            // force a wait
+            await new Promise(resolve => setTimeout(resolve, 500 * index));
+
+            if (postingEnabled) {
+                return agent.post({ text: post.message })
+                    .then((response) => {
+                        console.info('posted', post.message);
+                        return post.id;
+                    });
+            }
+
+            console.info('pretend posting', post.message);
+            return post.id;
         }))
     } catch (error) {
         console.error('failed to post advisories');
