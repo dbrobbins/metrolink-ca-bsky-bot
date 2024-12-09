@@ -37,7 +37,7 @@ let atpSessionData: AtpSessionData | undefined = undefined;
 const agent = new AtpAgent({
     service: 'https://bsky.social',
     persistSession: (event: AtpSessionEvent, session?: AtpSessionData) => {
-        session = session;
+        atpSessionData = session;
         logger.debug('session persisted in memory');
     }
 });
@@ -118,7 +118,7 @@ const postAll = async (posts: AdvisoryPost[]): Promise<number[]> => {
             throw new Error('env has no id or no pass');
         }
 
-        if (postingEnabled) {
+        if (postingEnabled && posts.length > 0) {
             if (atpSessionData) {
                 logger.debug('resuming session');
                 await agent.resumeSession(atpSessionData);
