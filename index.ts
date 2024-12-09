@@ -5,10 +5,23 @@ import { AdvisoryPost, Lines, LineServiceAdvisory, TYPE_SERVICE_ADVISORY } from 
 
 const RUN_INTERVAL_MINUTES: number = process.env.RUN_INTERVAL_MINUTES ? parseInt(process.env.RUN_INTERVAL_MINUTES) : 30;
 const RUN_INTERVAL_MS = RUN_INTERVAL_MINUTES * 60 * 1000;
-// TODO externalize to config
-const LINES_TO_POST = [Lines.IEOC.externalId]
 
+const linesToPost = (() => {
+    let toPost: string[] = [];
+
+    if (process.env.LINES_TO_POST) {
+        process.env.LINES_TO_POST.split(',').forEach(lineId => {
+            const resolvedLine = Lines.getLineById(lineId);
+            if (resolvedLine) {
+                toPost.push(resolvedLine.externalId);
+            }
+        });
+    }
+
+    return toPost;
+})();
 const serviceUrl: string = process.env.SERVICE_URL ?? '';
+const serviceUrlWithQuery = serviceUrl + '?lines=' + linesToPost.join('&lines=');
 const dataRequestEnabled: boolean = process.env.DATA_REQUEST_ENABLED === 'true';
 // only post if we're also getting real data
 const postingEnabled: boolean = dataRequestEnabled && process.env.POSTING_ENABLED === 'true';
@@ -42,7 +55,7 @@ const getServiceAdvisories = (): Promise<any> => {
     }
 
     // plain GET, no options needed
-    return fetch(serviceUrl)
+    return fetch(serviceUrlWithQuery)
         .then(response => response.json())
         .catch(error => {
             console.error('failed to fetch advisories');
@@ -55,7 +68,7 @@ const getPostsFromAdvisories = (lineServiceAdvisories: LineServiceAdvisory[]): A
         // only attempt to post lines we know about
         .filter(lineAdvisory => Lines.getLineByExternalId(lineAdvisory.LineAbbreviation) !== undefined)
         // filter to lines we care about
-        .filter(lineAdvisory => LINES_TO_POST.indexOf(lineAdvisory.LineAbbreviation) >= 0)
+        .filter(lineAdvisory => linesToPost.indexOf(lineAdvisory.LineAbbreviation) >= 0)
         // collect our service advisories
         .flatMap(lineAdvisory => lineAdvisory.ServiceAdvisories)
         // filter out non-advisories
@@ -124,7 +137,7 @@ function online() {
     }
 
     // Mon-Fri 4a-11:30p
-    return currentHour >= 4 && !(currentHour === 23 && currentMinute > 30)
+    return currentHour >= 4 && !(currentHour === 23 && currentMinute > 30);
 }
 
 function main() {
@@ -158,4 +171,8 @@ function main() {
 
 main();
 
-setInterval(main, RUN_INTERVAL_MS);
+if (linesToPost.length > 0) {
+    setInterval(main, RUN_INTERVAL_MS);
+} else {
+    console.error('env has empty set of lines to post');
+}

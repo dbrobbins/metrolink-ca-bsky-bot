@@ -1,7 +1,7 @@
 {
-  "name": "@brdev/tweet-at-bsky",
+  "name": "@brdev/metrolink-ca-bsky-bot",
   "version": "1.0.0",
-  "description": "Capture Tweets in Bluesky",
+  "description": "Monitor Metrolink CA service advisories and re-post them to Bluesky.",
   "main": "index.js",
   "scripts": {
     "build": "tsc",
@@ -11,17 +11,18 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dbrobbins/tweet-at-bsky.git"
+    "url": "git+https://github.com/dbrobbins/metrolink-ca-bsky-bot.git"
   },
   "keywords": [
-    "bsky"
+    "bluesky",
+    "bot"
   ],
   "author": "dbrobbins",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/dbrobbins/tweet-at-bsky/issues"
+    "url": "https://github.com/dbrobbins/metrolink-ca-bsky-bot/issues"
   },
-  "homepage": "https://github.com/dbrobbins/tweet-at-bsky#readme",
+  "homepage": "https://github.com/dbrobbins/metrolink-ca-bsky-bot#readme",
   "dependencies": {
     "@atproto/api": "^0.13.18"
   },

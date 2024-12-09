@@ -39,14 +39,26 @@ const util = __importStar(require("./util"));
 const types_1 = require("./types");
 const RUN_INTERVAL_MINUTES = process.env.RUN_INTERVAL_MINUTES ? parseInt(process.env.RUN_INTERVAL_MINUTES) : 30;
 const RUN_INTERVAL_MS = RUN_INTERVAL_MINUTES * 60 * 1000;
-// TODO externalize to config
-const LINES_TO_POST = [types_1.Lines.IEOC.externalId];
+const linesToPost = (() => {
+    let toPost = [];
+    if (process.env.LINES_TO_POST) {
+        process.env.LINES_TO_POST.split(',').forEach(lineId => {
+            const resolvedLine = types_1.Lines.getLineById(lineId);
+            if (resolvedLine) {
+                toPost.push(resolvedLine.externalId);
+            }
+        });
+    }
+    return toPost;
+})();
 const serviceUrl = process.env.SERVICE_URL ?? '';
+const serviceUrlWithQuery = serviceUrl + '?lines=' + linesToPost.join('&lines=');
 const dataRequestEnabled = process.env.DATA_REQUEST_ENABLED === 'true';
 // only post if we're also getting real data
 const postingEnabled = dataRequestEnabled && process.env.POSTING_ENABLED === 'true';
 const agent = new api_1.AtpAgent({ service: 'https://bsky.social' });
 let knownPostedIds = [];
+let isOnline = false;
 const postedInIntervalMs = (timestamp, intervalMs) => {
     // timezone-adjusted now
     const now = util.getPtNow();
@@ -67,7 +79,7 @@ const getServiceAdvisories = () => {
         throw new Error('env has no service url configured');
     }
     // plain GET, no options needed
-    return fetch(serviceUrl)
+    return fetch(serviceUrlWithQuery)
         .then(response => response.json())
         .catch(error => {
         console.error('failed to fetch advisories');
@@ -79,7 +91,7 @@ const getPostsFromAdvisories = (lineServiceAdvisories) => {
         // only attempt to post lines we know about
         .filter(lineAdvisory => types_1.Lines.getLineByExternalId(lineAdvisory.LineAbbreviation) !== undefined)
         // filter to lines we care about
-        // .filter(lineAdvisory => LINES_TO_POST.indexOf(lineAdvisory.LineAbbreviation) >= 0)
+        .filter(lineAdvisory => linesToPost.indexOf(lineAdvisory.LineAbbreviation) >= 0)
         // collect our service advisories
         .flatMap(lineAdvisory => lineAdvisory.ServiceAdvisories)
         // filter out non-advisories
@@ -89,7 +101,7 @@ const getPostsFromAdvisories = (lineServiceAdvisories) => {
         // filter out things we already posted during this run
         .filter(serviceAdvisory => knownPostedIds.indexOf(serviceAdvisory.Id) < 0)
         // filter out things that weren't posted since the last time we ran
-        .filter(serviceAdvisory => postedInIntervalMs(serviceAdvisory.Timestamp, (7 * 24 * 60 * 60 * 1000)))
+        .filter(serviceAdvisory => postedInIntervalMs(serviceAdvisory.Timestamp, RUN_INTERVAL_MS))
         .map(serviceAdvisory => {
         // If the message doesn't include the line, then we'll add our short name
         if (serviceAdvisory.Message.indexOf(serviceAdvisory.Line) < 0) {
@@ -142,7 +154,15 @@ function online() {
 function main() {
     // don't make requests when things aren't getting posted
     if (!online()) {
+        if (isOnline) {
+            isOnline = false;
+            console.log('going offline...');
+        }
         return;
+    }
+    if (!isOnline) {
+        isOnline = true;
+        console.log('coming online...');
     }
     try {
         getServiceAdvisories()
@@ -160,4 +180,9 @@ function main() {
     }
 }
 main();
-setInterval(main, RUN_INTERVAL_MS);
+if (linesToPost.length > 0) {
+    setInterval(main, RUN_INTERVAL_MS);
+}
+else {
+    console.error('env has empty set of lines to post');
+}

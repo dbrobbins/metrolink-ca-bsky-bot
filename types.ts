@@ -3,8 +3,8 @@
  */
 
 export type Line = {
-    // my own static ID in case I ever need a reference
-    id: number,
+    // my own static ID for my own internal reference
+    id: string,
     // the "line abbreviation" used in Metrolink's data, subject to change
     externalId: string,
     // a human-readable display name
@@ -14,15 +14,23 @@ export type Line = {
 }
 
 export class Lines {
-    static readonly AV: Line = { id: 1, externalId: 'AV', name: 'Antellope Valley Line', shortName: 'AV Line' };
-    static readonly IEOC: Line = { id: 2, externalId: 'IEOC', name: "Inland Empire-Orange County Line", shortName: 'IEOC Line' };
-    static readonly OC: Line = { id: 3, externalId: 'OC', name: 'Orange County Line', shortName: 'OC Line' };
-    static readonly RIV: Line = { id: 4, externalId: 'RIV', name: 'Riverside Line', shortName: 'RIV Line' };
-    static readonly SB: Line = { id: 5, externalId: 'SB', name: 'San Bernardino Line', shortName: 'SB Line' };
-    static readonly VC: Line = { id: 6, externalId: 'VC', name: 'Ventura County Line', shortName: 'VC Line' };
-    static readonly PV91: Line = { id: 7, externalId: '91/PV', name: '91/Perris Valley Line', shortName: '91/PV Line' };
+    static readonly AV: Line = { id: 'AV', externalId: 'AV', name: 'Antellope Valley Line', shortName: 'AV Line' };
+    static readonly IEOC: Line = { id: 'IEOC', externalId: 'IEOC', name: "Inland Empire-Orange County Line", shortName: 'IEOC Line' };
+    static readonly OC: Line = { id: 'OC', externalId: 'OC', name: 'Orange County Line', shortName: 'OC Line' };
+    static readonly RIV: Line = { id: 'RIV', externalId: 'RIV', name: 'Riverside Line', shortName: 'RIV Line' };
+    static readonly SB: Line = { id: 'SB', externalId: 'SB', name: 'San Bernardino Line', shortName: 'SB Line' };
+    static readonly VC: Line = { id: 'VC', externalId: 'VC', name: 'Ventura County Line', shortName: 'VC Line' };
+    static readonly PV91: Line = { id: 'PV91', externalId: '91/PV', name: '91/Perris Valley Line', shortName: '91/PV Line' };
 
     static readonly ALL: Line[] = [Lines.AV, Lines.IEOC, Lines.OC, Lines.RIV, Lines.SB, Lines.VC, Lines.PV91];
+
+    static getLineById(id: string): Line | undefined {
+        for (let line of Lines.ALL) {
+            if (line.id === id) {
+                return line;
+            }
+        }
+    }
 
     static getLineByExternalId(externalId: string): Line | undefined {
         for (let line of Lines.ALL) {

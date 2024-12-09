@@ -5,14 +5,21 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AdvisoryPost = exports.TYPE_SERVICE_ADVISORY = exports.Lines = void 0;
 class Lines {
-    static AV = { id: 1, externalId: 'AV', name: 'Antellope Valley Line', shortName: 'AV Line' };
-    static IEOC = { id: 2, externalId: 'IEOC', name: "Inland Empire-Orange County Line", shortName: 'IEOC Line' };
-    static OC = { id: 3, externalId: 'OC', name: 'Orange County Line', shortName: 'OC Line' };
-    static RIV = { id: 4, externalId: 'RIV', name: 'Riverside Line', shortName: 'RIV Line' };
-    static SB = { id: 5, externalId: 'SB', name: 'San Bernardino Line', shortName: 'SB Line' };
-    static VC = { id: 6, externalId: 'VC', name: 'Ventura County Line', shortName: 'VC Line' };
-    static PV91 = { id: 7, externalId: '91/PV', name: '91/Perris Valley Line', shortName: '91/PV Line' };
+    static AV = { id: 'AV', externalId: 'AV', name: 'Antellope Valley Line', shortName: 'AV Line' };
+    static IEOC = { id: 'IEOC', externalId: 'IEOC', name: "Inland Empire-Orange County Line", shortName: 'IEOC Line' };
+    static OC = { id: 'OC', externalId: 'OC', name: 'Orange County Line', shortName: 'OC Line' };
+    static RIV = { id: 'RIV', externalId: 'RIV', name: 'Riverside Line', shortName: 'RIV Line' };
+    static SB = { id: 'SB', externalId: 'SB', name: 'San Bernardino Line', shortName: 'SB Line' };
+    static VC = { id: 'VC', externalId: 'VC', name: 'Ventura County Line', shortName: 'VC Line' };
+    static PV91 = { id: 'PV91', externalId: '91/PV', name: '91/Perris Valley Line', shortName: '91/PV Line' };
     static ALL = [Lines.AV, Lines.IEOC, Lines.OC, Lines.RIV, Lines.SB, Lines.VC, Lines.PV91];
+    static getLineById(id) {
+        for (let line of Lines.ALL) {
+            if (line.id === id) {
+                return line;
+            }
+        }
+    }
     static getLineByExternalId(externalId) {
         for (let line of Lines.ALL) {
             if (line.externalId === externalId) {
