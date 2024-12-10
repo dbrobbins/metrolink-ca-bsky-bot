@@ -22,7 +22,7 @@ const linesToPost = (() => {
 
     return toPost;
 })();
-logger.info('lines to post', linesToPost);
+logger.info('lines to post', linesToPost.join(','));
 const serviceUrl: string = process.env.SERVICE_URL ?? '';
 logger.info('service url', serviceUrl);
 const serviceUrlWithQuery = serviceUrl + '?lines=' + linesToPost.join('&lines=');
@@ -41,9 +41,11 @@ const agent = new AtpAgent({
         logger.debug('session persisted in memory');
     }
 });
+const startUpDate = util.getPtNow();
 let loopCount = 0;
 let knownPostedIds: number[] = [];
 let isOnline = false;
+
 
 const postedInIntervalMs = (timestamp: string, intervalMs: number): boolean => {
     // timezone-adjusted now
@@ -58,6 +60,12 @@ const postedInIntervalMs = (timestamp: string, intervalMs: number): boolean => {
     logger.debug('now', now.toISOString(), 'postDate', postDate.toISOString(), 'postTime', postTime, 'range', intervalStart, '-', intervalEnd);
 
     return postTime >= intervalStart && postTime <= intervalEnd;
+}
+
+const postedSinceStartUp = (timestamp: string): boolean => {
+    const now = util.getPtNow();
+
+    return postedInIntervalMs(timestamp, now.getTime() - startUpDate.getTime());
 }
 
 const getServiceAdvisories = (): Promise<any> => {
@@ -119,9 +127,12 @@ const getPostsFromAdvisories = (lineServiceAdvisories: LineServiceAdvisory[]): A
         })
         // filter out things that weren't posted since the last time we ran
         .filter(serviceAdvisory => {
-            const keep = postedInIntervalMs(serviceAdvisory.Timestamp, RUN_INTERVAL_MS);
-            logger.debug('age check: too old?', !keep, serviceAdvisory.Id, serviceAdvisory.Timestamp);
-            return keep;
+            const insideRunInterval = postedInIntervalMs(serviceAdvisory.Timestamp, RUN_INTERVAL_MS);
+            // turns out the advisories page can be >5 minutes behind, so check against startup time too
+            const insideStartUpIntervalAndNotPosted = postedSinceStartUp(serviceAdvisory.Timestamp) && knownPostedIds.indexOf(serviceAdvisory.Id) < 0;
+            logger.debug('age check: inside run interval?', insideRunInterval, serviceAdvisory.Id, serviceAdvisory.Timestamp);
+            logger.debug('age check: unposted inside startup interval?', insideRunInterval, serviceAdvisory.Id, serviceAdvisory.Timestamp);
+            return insideRunInterval || insideStartUpIntervalAndNotPosted;
         })
         .map(serviceAdvisory => {
             // If the message doesn't include the line, then we'll add our short name
@@ -215,18 +226,21 @@ function main() {
     try {
         getServiceAdvisories()
             .then(json => {
-                logger.debug('data fetch response', json);
                 const lineAdvisories = json as LineServiceAdvisory[];
-                logger.info('received advisories for lines', lineAdvisories.map(lineAdvisory => lineAdvisory.LineAbbreviation).join(','));
+                logger.debug('received advisories for lines', lineAdvisories.map(lineAdvisory => lineAdvisory.LineAbbreviation).join(','));
+                logger.debug('received service advisories with ids', lineAdvisories
+                    .flatMap(lineAdvisory => lineAdvisory.ServiceAdvisories)
+                    .map(serviceAdvisory => serviceAdvisory.Id)
+                    .join(','));
                 return getPostsFromAdvisories(lineAdvisories);
             })
             .then(posts => {
-                logger.debug('posting all', posts);
+                logger.debug('posting all', posts.join(','));
                 logger.info('posting count', posts.length);
                 return postAll(posts);
             })
             .then(postedIds => {
-                logger.info('marking posted', postedIds);
+                logger.info('marking posted', postedIds.join(','));
                 postedIds.forEach(id => knownPostedIds.push(id));
             });
     } catch (e) {
