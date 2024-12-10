@@ -189,18 +189,18 @@ function main() {
     try {
         getServiceAdvisories()
             .then(json => {
-                console.debug('data fetch response', json);
+                logger.debug('data fetch response', json);
                 const lineAdvisories = json as LineServiceAdvisory[];
-                console.info('received advisories for lines', lineAdvisories.map(lineAdvisory => lineAdvisory.LineAbbreviation).join(','));
+                logger.info('received advisories for lines', lineAdvisories.map(lineAdvisory => lineAdvisory.LineAbbreviation).join(','));
                 return getPostsFromAdvisories(lineAdvisories);
             })
             .then(posts => {
-                console.debug('posting all', posts);
-                console.info('posting count', posts.length);
+                logger.debug('posting all', posts);
+                logger.info('posting count', posts.length);
                 return postAll(posts);
             })
             .then(postedIds => {
-                console.info('marking posted', postedIds);
+                logger.info('marking posted', postedIds);
                 postedIds.forEach(id => knownPostedIds.push(id));
             });
     } catch (e) {
