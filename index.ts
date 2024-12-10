@@ -135,16 +135,16 @@ const getPostsFromAdvisories = (lineServiceAdvisories: LineServiceAdvisory[]): A
             return insideRunInterval || insideStartUpIntervalAndNotPosted;
         })
         .map(serviceAdvisory => {
+            // Since we can end up posting on a delay, always include the post time.
+            let message = `${serviceAdvisory.Timestamp} ${serviceAdvisory.Message}`;
+
             // If the message doesn't include the line, then we'll add our short name
-            if (serviceAdvisory.Message.indexOf(serviceAdvisory.Line) < 0) {
+            if (message.indexOf(serviceAdvisory.Line) < 0) {
                 const line = Lines.getLineByExternalId(serviceAdvisory.Line);
-                return new AdvisoryPost(
-                    serviceAdvisory.Id,
-                    `(${line?.shortName}) ${serviceAdvisory.Message}`
-                )
+                message = `(${line?.shortName}) ${message}`;
             }
 
-            return new AdvisoryPost(serviceAdvisory.Id, serviceAdvisory.Message)
+            return new AdvisoryPost(serviceAdvisory.Id, message)
         });
 }
 
