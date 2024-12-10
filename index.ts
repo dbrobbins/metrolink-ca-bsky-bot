@@ -55,6 +55,8 @@ const postedInIntervalMs = (timestamp: string, intervalMs: number): boolean => {
     const intervalStart = intervalEnd - intervalMs;
     const postTime = postDate.getTime();
 
+    logger.debug('now', now.toISOString(), 'postDate', postDate.toISOString(), 'postTime', postTime, 'range', intervalStart, '-', intervalEnd);
+
     return postTime >= intervalStart && postTime <= intervalEnd;
 }
 
@@ -72,8 +74,8 @@ const getServiceAdvisories = (): Promise<any> => {
     logger.debug('fetching data');
     loopCount += 1;
 
-    // plain GET, no options needed
-    return fetch(serviceUrlWithQuery)
+    // plain GET, cache-bust. Switch to no-cache to respect cache headers.
+    return fetch(serviceUrlWithQuery, { cache: 'no-store' })
         .then(response => response.json())
         .catch(error => {
             logger.error('failed to fetch advisories');
@@ -84,19 +86,43 @@ const getServiceAdvisories = (): Promise<any> => {
 const getPostsFromAdvisories = (lineServiceAdvisories: LineServiceAdvisory[]): AdvisoryPost[] => {
     return lineServiceAdvisories
         // only attempt to post lines we know about
-        .filter(lineAdvisory => Lines.getLineByExternalId(lineAdvisory.LineAbbreviation) !== undefined)
+        .filter(lineAdvisory => {
+            const keep = Lines.getLineByExternalId(lineAdvisory.LineAbbreviation) !== undefined;
+            if (!keep) logger.debug('not posting: unrecognized external id', lineAdvisory.LineAbbreviation);
+            return keep;
+        })
         // filter to lines we care about
-        .filter(lineAdvisory => linesToPost.indexOf(lineAdvisory.LineAbbreviation) >= 0)
+        .filter(lineAdvisory => {
+            const keep = linesToPost.indexOf(lineAdvisory.LineAbbreviation) >= 0;
+            if (!keep) logger.debug('not posting: not in lines to post', lineAdvisory.LineAbbreviation);
+            return keep;
+        })
         // collect our service advisories
         .flatMap(lineAdvisory => lineAdvisory.ServiceAdvisories)
         // filter out non-advisories
-        .filter(serviceAdvisory => serviceAdvisory.Type === TYPE_SERVICE_ADVISORY)
+        .filter(serviceAdvisory => {
+            const keep = serviceAdvisory.Type === TYPE_SERVICE_ADVISORY;
+            if (!keep) logger.debug('not posting: not of type service advisory', serviceAdvisory.Id, serviceAdvisory.Type);
+            return keep;
+        })
         // filter out empty messages
-        .filter(serviceAdvisory => serviceAdvisory.Message.trim())
+        .filter(serviceAdvisory => {
+            const keep = serviceAdvisory.Message.trim();
+            if (!keep) logger.debug('not posting: message empty', serviceAdvisory.Id);
+            return keep;
+        })
         // filter out things we already posted during this run
-        .filter(serviceAdvisory => knownPostedIds.indexOf(serviceAdvisory.Id) < 0)
+        .filter(serviceAdvisory => {
+            const keep = knownPostedIds.indexOf(serviceAdvisory.Id) < 0;
+            if (!keep) logger.debug('not posting: already posted', serviceAdvisory.Id);
+            return keep;
+        })
         // filter out things that weren't posted since the last time we ran
-        .filter(serviceAdvisory => postedInIntervalMs(serviceAdvisory.Timestamp, RUN_INTERVAL_MS))
+        .filter(serviceAdvisory => {
+            const keep = postedInIntervalMs(serviceAdvisory.Timestamp, RUN_INTERVAL_MS);
+            logger.debug('age check: too old?', !keep, serviceAdvisory.Id, serviceAdvisory.Timestamp);
+            return keep;
+        })
         .map(serviceAdvisory => {
             // If the message doesn't include the line, then we'll add our short name
             if (serviceAdvisory.Message.indexOf(serviceAdvisory.Line) < 0) {
