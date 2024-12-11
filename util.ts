@@ -2,7 +2,11 @@
  * @returns time adjusted to PT time zone
  */
 export function getPtNow() {
-    return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+    return new Date(toPtString(new Date()));
+}
+
+export function toPtString(date: Date): string {
+    return date.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
 }
 
 export class Logger {
@@ -19,19 +23,19 @@ export class Logger {
     }
 
     debug(message?: any, ...optionalParams: any[]): void {
-        this.shouldLog(Logger.LogLevel.DEBUG) && console.debug(message, ...optionalParams);
+        this.shouldLog(Logger.LogLevel.DEBUG) && console.debug(`DEBUG ${message}`, ...optionalParams);
     }
 
     info(message?: any, ...optionalParams: any[]): void {
-        this.shouldLog(Logger.LogLevel.INFO) && console.info(message, ...optionalParams);
+        this.shouldLog(Logger.LogLevel.INFO) && console.info(`--INFO ${message}`, ...optionalParams);
     }
 
     warn(message?: any, ...optionalParams: any[]): void {
-        this.shouldLog(Logger.LogLevel.WARN) && console.warn(message, ...optionalParams);
+        this.shouldLog(Logger.LogLevel.WARN) && console.warn(`----WARN ${message}`, ...optionalParams);
     }
 
     error(message?: any, ...optionalParams: any[]): void {
-        this.shouldLog(Logger.LogLevel.ERROR) && console.error(message, ...optionalParams);
+        this.shouldLog(Logger.LogLevel.ERROR) && console.error(`--------ERROR ${message}`, ...optionalParams);
     }
 
     shouldLog(level: Logger.LogLevel): boolean {

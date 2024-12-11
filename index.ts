@@ -82,9 +82,18 @@ const getServiceAdvisories = (): Promise<any> => {
     logger.debug('fetching data');
     loopCount += 1;
 
-    // plain GET, cache-bust. Switch to no-cache to respect cache headers.
-    return fetch(serviceUrlWithQuery, { cache: 'no-store' })
-        .then(response => response.json())
+    // plain GET
+    return fetch(serviceUrlWithQuery)
+        .then(response => {
+            const cfCacheStatus = response.headers.get("cf-cache-status");
+            const dateRaw = response.headers.get('date');
+            console.debug('cf-cache-status', cfCacheStatus, 'date', dateRaw);
+            if (cfCacheStatus === "HIT") {
+                const dateString = dateRaw ? util.toPtString(new Date(dateRaw)) : dateRaw;
+                console.info('cf-cache-status reports HIT with date', dateString);
+            }
+            return response.json();
+        })
         .catch(error => {
             logger.error('failed to fetch advisories');
             throw error;
