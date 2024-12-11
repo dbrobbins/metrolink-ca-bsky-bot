@@ -82,16 +82,10 @@ const getServiceAdvisories = (): Promise<any> => {
     logger.debug('fetching data');
     loopCount += 1;
 
-    // plain GET
-    return fetch(serviceUrlWithQuery)
+    // plain GET with manual cache-busting
+    return fetch(`${serviceUrlWithQuery}&req=${loopCount}`)
         .then(response => {
-            const cfCacheStatus = response.headers.get("cf-cache-status");
-            const dateRaw = response.headers.get('date');
-            console.debug('cf-cache-status', cfCacheStatus, 'date', dateRaw);
-            if (cfCacheStatus === "HIT") {
-                const dateString = dateRaw ? util.toPtString(new Date(dateRaw)) : dateRaw;
-                console.info('cf-cache-status reports HIT with date', dateString);
-            }
+            logger.debug('cf-cache-status', response.headers.get("cf-cache-status"), 'date', response.headers.get('date'));
             return response.json();
         })
         .catch(error => {
@@ -244,12 +238,16 @@ function main() {
                 return getPostsFromAdvisories(lineAdvisories);
             })
             .then(posts => {
-                logger.debug('posting all', posts.join(','));
-                logger.info('posting count', posts.length);
+                if (posts.length > 0) {
+                    logger.debug('posting all', posts.join(','));
+                    logger.info('posting count', posts.length);
+                }
                 return postAll(posts);
             })
             .then(postedIds => {
-                logger.info('marking posted', postedIds.join(','));
+                if (postedIds.length > 0) {
+                    logger.info('marking posted', postedIds.join(','));
+                }
                 postedIds.forEach(id => knownPostedIds.push(id));
             });
     } catch (e) {
