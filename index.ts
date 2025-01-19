@@ -139,7 +139,7 @@ const getPostsFromAdvisories = (lineServiceAdvisories: LineServiceAdvisory[]): A
         })
         .map(serviceAdvisory => {
             // Since we can end up posting on a delay, always include the post time.
-            let message = `${serviceAdvisory.Timestamp} ${serviceAdvisory.Message}`;
+            let message = `${serviceAdvisory.Message} (${serviceAdvisory.Timestamp})`;
 
             // If the message doesn't include the line, then we'll add our short name
             if (message.indexOf(serviceAdvisory.Line) < 0) {
