@@ -32,6 +32,8 @@ logger.info('data request enabled', dataRequestEnabled);
 // only post if we're also getting real data
 const postingEnabled: boolean = dataRequestEnabled && process.env.POSTING_ENABLED === 'true';
 logger.info('posting enabled', postingEnabled);
+const maxPostLength: number = process.env.MAX_POST_LENGTH ? parseInt(process.env.MAX_POST_LENGTH) : 290;
+logger.info('max post length', maxPostLength);
 
 let atpSessionData: AtpSessionData | undefined = undefined;
 const agent = new AtpAgent({
@@ -137,7 +139,7 @@ const getPostsFromAdvisories = (lineServiceAdvisories: LineServiceAdvisory[]): A
             logger.debug('age check: unposted inside startup interval?', insideRunInterval, serviceAdvisory.Id, serviceAdvisory.Timestamp);
             return insideRunInterval || insideStartUpIntervalAndNotPosted;
         })
-        .map(serviceAdvisory => {
+        .flatMap(serviceAdvisory => {
             // Since we can end up posting on a delay, always include the post time.
             let message = `${serviceAdvisory.Message} (${serviceAdvisory.Timestamp})`;
 
@@ -147,7 +149,16 @@ const getPostsFromAdvisories = (lineServiceAdvisories: LineServiceAdvisory[]): A
                 message = `(${line?.shortName}) ${message}`;
             }
 
-            return new AdvisoryPost(serviceAdvisory.Id, message)
+            if (message.length > maxPostLength) {
+                const chunks = util.chunkMessage(message, maxPostLength);
+
+                return chunks.map((chunk, index) => {
+                    const chunkedMessage = `(${index + 1}/${chunks.length}) ${chunk}`;
+                    return new AdvisoryPost(serviceAdvisory.Id, chunkedMessage);
+                });
+            }
+
+            return [new AdvisoryPost(serviceAdvisory.Id, message)];
         });
 }
 
@@ -181,6 +192,11 @@ const postAll = async (posts: AdvisoryPost[]): Promise<number[]> => {
                         logger.debug('post response', response);
                         logger.info('posted', post.message);
                         return post.id;
+                    })
+                    .catch(error => {
+                        logger.error('failed to post', post.message);
+                        logger.error('with error', error.message);
+                        return 0;
                     });
             }
 

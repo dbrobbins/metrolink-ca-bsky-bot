@@ -9,6 +9,17 @@ export function toPtString(date: Date): string {
     return date.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
 }
 
+export function chunkMessage(message: string, chunkSize: number): string[] {
+    const chunkCount = Math.ceil(message.length / chunkSize);
+    const chunks = new Array<string>(chunkCount);
+
+    for (let i = 0, o = 0; i < chunkCount; ++i, o += chunkSize) {
+        chunks[i] = message.substring(o, chunkSize);
+    }
+
+    return chunks;
+}
+
 export class Logger {
 
     private readonly logLevel: Logger.LogLevel;
