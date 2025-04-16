@@ -10,11 +10,23 @@ export function toPtString(date: Date): string {
 }
 
 export function chunkMessage(message: string, chunkSize: number): string[] {
-    const chunkCount = Math.ceil(message.length / chunkSize);
-    const chunks = new Array<string>(chunkCount);
+    const chunks: string[] = [];
 
-    for (let i = 0, o = 0; i < chunkCount; ++i, o += chunkSize) {
-        chunks[i] = message.substring(o, chunkSize);
+    let currentPos = 0;
+    // just in case
+    let loopCount = 0;
+    while (currentPos < message.length && loopCount < 5) {
+        const targetPos = currentPos + chunkSize;
+        let target = message.substring(currentPos, targetPos);
+        // if we aren't consuming the end of the string yet, break at the last space
+        if (targetPos < message.length) {
+            target = target.substring(0, target.lastIndexOf(' '));
+        }
+        chunks.push(target);
+
+        // account for the space we maybe split at, or go over which is fine
+        currentPos += target.length + 1;
+        loopCount += 1;
     }
 
     return chunks;
