@@ -133,7 +133,7 @@ const getPostsFromServiceAlerts = (serviceAlerts: ServiceAlert[]): AdvisoryPost[
             // Since we can end up posting on a delay, always include the post time.
             const currentActivePeriod = apiUtil.getCurrentActivePeriod(serviceAlert.Alert.ActivePeriod, RUN_INTERVAL_MS, startUpDate.getTime(), logger);
             if (currentActivePeriod) {
-                message += ` (${util.toPtString(new Date(currentActivePeriod.Start))})`;
+                message += ` (${util.toPtString(new Date(currentActivePeriod.Start * 1000))})`;
             }
 
             const affectedLines = getAffectedLines(serviceAlert);
