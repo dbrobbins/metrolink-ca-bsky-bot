@@ -9,6 +9,24 @@ export function toPtString(date: Date): string {
     return date.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
 }
 
+export function msElapsedSince(timestampMs: number) {
+    return (new Date()).getTime() - timestampMs;
+}
+
+export function timestampInIntervalMs(timestampS: number, intervalMs: number, logger?: Logger): boolean {
+    const now = new Date();
+    const postDate = new Date(timestampS * 1000);
+    const intervalEnd = now.getTime();
+    const intervalStart = intervalEnd - intervalMs;
+    const postTime = postDate.getTime();
+
+    if (logger) {
+        logger.debug('now', now.toISOString(), 'postDate', postDate.toISOString(), 'postTime', postTime, 'range', intervalStart, '-', intervalEnd);
+    }
+
+    return postTime >= intervalStart && postTime <= intervalEnd;
+}
+
 export function chunkMessage(message: string, chunkSize: number): string[] {
     const chunks: string[] = [];
 

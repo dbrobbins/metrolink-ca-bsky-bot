@@ -1,12 +1,13 @@
 import { AtpAgent, AtpSessionData, AtpSessionEvent } from "@atproto/api";
 import { RESPONSE } from './test';
-import * as util from './util';
-import { AdvisoryPost, Lines, LineServiceAdvisory, TYPE_SERVICE_ADVISORY } from './types';
+import * as util from './general-util';
+import * as apiUtil from './api-object-util';
+import { ActivePeriod, AdvisoryPost, GetAdvisoriesResponse, Line, Lines, ServiceAlert, Translation, TRANSLATION_EN } from './types';
 
 const RUN_INTERVAL_MINUTES: number = process.env.RUN_INTERVAL_MINUTES ? parseInt(process.env.RUN_INTERVAL_MINUTES) : 30;
 const RUN_INTERVAL_MS = RUN_INTERVAL_MINUTES * 60 * 1000;
 
-const logger: util.Logger = new util.Logger(process.env.LOG_LEVEL);
+const logger: util.Logger = new util.Logger(process.env.LOG_LEVEL ?? "debug");
 
 const linesToPost = (() => {
     let toPost: string[] = [];
@@ -43,31 +44,19 @@ const agent = new AtpAgent({
         logger.debug('session persisted in memory');
     }
 });
-const startUpDate = util.getPtNow();
+const startUpDate = new Date();
 let loopCount = 0;
-let knownPostedIds: number[] = [];
+let knownPostedIds: string[] = [];
 let isOnline = false;
 
-
-const postedInIntervalMs = (timestamp: string, intervalMs: number): boolean => {
-    // timezone-adjusted now
-    const now = util.getPtNow();
-    // post date already timezone-adjusted
-    const postDate = new Date(timestamp);
-
-    const intervalEnd = now.getTime();
-    const intervalStart = intervalEnd - intervalMs;
-    const postTime = postDate.getTime();
-
-    logger.debug('now', now.toISOString(), 'postDate', postDate.toISOString(), 'postTime', postTime, 'range', intervalStart, '-', intervalEnd);
-
-    return postTime >= intervalStart && postTime <= intervalEnd;
-}
-
-const postedSinceStartUp = (timestamp: string): boolean => {
-    const now = util.getPtNow();
-
-    return postedInIntervalMs(timestamp, now.getTime() - startUpDate.getTime());
+const getAffectedLines = (serviceAlert: ServiceAlert): Line[] => {
+    return serviceAlert.Alert.InformedEntity
+        .filter(informedEntity => {
+            const affectedLine = Lines.getLineByDatabaseId(informedEntity.Id);
+            return affectedLine && linesToPost.indexOf(affectedLine.id) >= 0;
+        })
+        // cast to Line since we already know these are safe
+        .map(informedEntity => Lines.getLineByDatabaseId(informedEntity.Id) as Line);
 }
 
 const getServiceAdvisories = (): Promise<any> => {
@@ -96,73 +85,83 @@ const getServiceAdvisories = (): Promise<any> => {
         });
 }
 
-const getPostsFromAdvisories = (lineServiceAdvisories: LineServiceAdvisory[]): AdvisoryPost[] => {
-    return lineServiceAdvisories
-        // only attempt to post lines we know about
-        .filter(lineAdvisory => {
-            const keep = Lines.getLineByExternalId(lineAdvisory.LineAbbreviation) !== undefined;
-            if (!keep) logger.debug('not posting: unrecognized external id', lineAdvisory.LineAbbreviation);
-            return keep;
-        })
+const getPostsFromServiceAlerts = (serviceAlerts: ServiceAlert[]): AdvisoryPost[] => {
+    return serviceAlerts
         // filter to lines we care about
-        .filter(lineAdvisory => {
-            const keep = linesToPost.indexOf(lineAdvisory.LineAbbreviation) >= 0;
-            if (!keep) logger.debug('not posting: not in lines to post', lineAdvisory.LineAbbreviation);
+        .filter(serviceAlert => {
+            const keep = getAffectedLines(serviceAlert).length > 0;
+            if (!keep) logger.debug('not posting: affected lines are not in lines to post', serviceAlert.Id);
             return keep;
         })
-        // collect our service advisories
-        .flatMap(lineAdvisory => lineAdvisory.ServiceAdvisories)
-        // filter out non-advisories
-        .filter(serviceAdvisory => {
-            const keep = serviceAdvisory.Type === TYPE_SERVICE_ADVISORY;
-            if (!keep) logger.debug('not posting: not of type service advisory', serviceAdvisory.Id, serviceAdvisory.Type);
-            return keep;
-        })
-        // filter out empty messages
-        .filter(serviceAdvisory => {
-            const keep = serviceAdvisory.Message.trim();
-            if (!keep) logger.debug('not posting: message empty', serviceAdvisory.Id);
+        // filter out non-english alerts
+        .filter(serviceAlert => {
+            const keep = apiUtil.getEnHeader(serviceAlert) !== undefined;
+            if (!keep) logger.debug('not posting: message empty', serviceAlert.Id);
             return keep;
         })
         // filter out things we already posted during this run
-        .filter(serviceAdvisory => {
-            const keep = knownPostedIds.indexOf(serviceAdvisory.Id) < 0;
-            if (!keep) logger.debug('not posting: already posted', serviceAdvisory.Id);
+        .filter(serviceAlert => {
+            const keep = knownPostedIds.indexOf(serviceAlert.Id) < 0;
+            if (!keep) logger.debug('not posting: already posted', serviceAlert.Id);
             return keep;
         })
         // filter out things that weren't posted since the last time we ran
-        .filter(serviceAdvisory => {
-            const insideRunInterval = postedInIntervalMs(serviceAdvisory.Timestamp, RUN_INTERVAL_MS);
+        .filter(serviceAlert => {
+            // sort active periods by start, in descending order
+            serviceAlert.Alert.ActivePeriod.sort(apiUtil.activePeriodsByStart).reverse();
+
+            const currentRunActivePeriod = apiUtil.getCurrentRunActivePeriod(serviceAlert.Alert.ActivePeriod, RUN_INTERVAL_MS, logger);
+
             // turns out the advisories page can be >5 minutes behind, so check against startup time too
-            const insideStartUpIntervalAndNotPosted = postedSinceStartUp(serviceAdvisory.Timestamp) && knownPostedIds.indexOf(serviceAdvisory.Id) < 0;
-            logger.debug('age check: inside run interval?', insideRunInterval, serviceAdvisory.Id, serviceAdvisory.Timestamp);
-            logger.debug('age check: unposted inside startup interval?', insideRunInterval, serviceAdvisory.Id, serviceAdvisory.Timestamp);
-            return insideRunInterval || insideStartUpIntervalAndNotPosted;
+            const activePeriodSinceStartup = apiUtil.getActivePeriodSinceStartup(serviceAlert.Alert.ActivePeriod, startUpDate.getTime(), logger);
+            // being inside startup interval only matters if also not posted
+            const notPosted = knownPostedIds.indexOf(serviceAlert.Id) < 0;
+
+            logger.debug('age check: inside run interval?', currentRunActivePeriod !== undefined, serviceAlert.Id);
+            logger.debug('age check: inside startup interval?', activePeriodSinceStartup !== undefined, serviceAlert.Id);
+            logger.debug('age check: not posted?', notPosted, serviceAlert.Id);
+            return currentRunActivePeriod !== undefined || (activePeriodSinceStartup !== undefined && notPosted);
         })
-        .flatMap(serviceAdvisory => {
+        .flatMap(serviceAlert => {
+            let message = `${apiUtil.getEnHeader(serviceAlert).Text}`;
+
+            const description = apiUtil.getEnDescription(serviceAlert);
+            if (description) {
+                message += ` ${description.Text}`;
+            }
+
             // Since we can end up posting on a delay, always include the post time.
-            let message = `${serviceAdvisory.Message} (${serviceAdvisory.Timestamp})`;
-
-            // If the message doesn't include the line, then we'll add our short name
-            if (message.indexOf(serviceAdvisory.Line) < 0) {
-                const line = Lines.getLineByExternalId(serviceAdvisory.Line);
-                message = `(${line?.shortName}) ${message}`;
+            const currentActivePeriod = apiUtil.getCurrentActivePeriod(serviceAlert.Alert.ActivePeriod, RUN_INTERVAL_MS, startUpDate.getTime(), logger);
+            if (currentActivePeriod) {
+                message += ` (${util.toPtString(new Date(currentActivePeriod.Start))})`;
             }
 
-            if (message.length > maxPostLength) {
-                const chunks = util.chunkMessage(message, maxPostLength);
+            const affectedLines = getAffectedLines(serviceAlert);
+            const posts: AdvisoryPost[] = [];
 
-                return chunks.map((chunk, index) => {
-                    const chunkedMessage = `(${index + 1}/${chunks.length}) ${chunk}`;
-                    return new AdvisoryPost(serviceAdvisory.Id, chunkedMessage);
-                });
-            }
+            affectedLines.forEach((line: Line) => {
+                // If the message doesn't include the line, then we'll add our short name
+                if (message.indexOf(line.externalId) < 0) {
+                    message = `(${line.shortName}) ${message}`;
+                }
 
-            return [new AdvisoryPost(serviceAdvisory.Id, message)];
+                if (message.length > maxPostLength) {
+                    const chunks = util.chunkMessage(message, maxPostLength);
+
+                    chunks.forEach((chunk: string, index: number) => {
+                        const chunkedMessage = `(${index + 1}/${chunks.length}) ${chunk}`;
+                        posts.push(new AdvisoryPost(serviceAlert.Id, chunkedMessage));
+                    });
+                } else {
+                    posts.push(new AdvisoryPost(serviceAlert.Id, message));
+                }
+            });
+
+            return posts;
         });
 }
 
-const postAll = async (posts: AdvisoryPost[]): Promise<number[]> => {
+const postAll = async (posts: AdvisoryPost[]): Promise<string[]> => {
     try {
         const id = process.env.BLUESKY_ID;
         const pass = process.env.BLUESKY_PASS;
@@ -196,7 +195,7 @@ const postAll = async (posts: AdvisoryPost[]): Promise<number[]> => {
                     .catch(error => {
                         logger.error('failed to post', post.message);
                         logger.error('with error', error.message);
-                        return 0;
+                        return '';
                     });
             }
 
@@ -245,13 +244,15 @@ function main() {
     try {
         getServiceAdvisories()
             .then(json => {
-                const lineAdvisories = json as LineServiceAdvisory[];
-                logger.debug('received advisories for lines', lineAdvisories.map(lineAdvisory => lineAdvisory.LineAbbreviation).join(','));
-                logger.debug('received service advisories with ids', lineAdvisories
-                    .flatMap(lineAdvisory => lineAdvisory.ServiceAdvisories)
-                    .map(serviceAdvisory => serviceAdvisory.Id)
+                const serviceAlerts = (json as GetAdvisoriesResponse).Alerts.ServiceAlerts;
+                logger.debug('received advisories with ids', serviceAlerts.map(serviceAlert => serviceAlert.Id).join(','));
+                logger.debug('received advisories for lines', serviceAlerts
+                    .flatMap(serviceAlert => serviceAlert.Alert)
+                    .flatMap(alert => alert.InformedEntity)
+                    .map(informedEntity => informedEntity.Id)
+                    .filter(id => id !== 0)
                     .join(','));
-                return getPostsFromAdvisories(lineAdvisories);
+                return getPostsFromServiceAlerts(serviceAlerts);
             })
             .then(posts => {
                 if (posts.length > 0) {

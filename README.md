@@ -16,11 +16,14 @@ You'll need to configure a local `.env.local` containing the following:
 
 ```
 SERVICE_URL=
-RUN_INTERVAL_MINUTES=5
+LINES_TO_POST=a,b,c
+RUN_INTERVAL_MINUTES=10
 DATA_REQUEST_ENABLED=false
 POSTING_ENABLED=false
+MAX_POST_LENGTH=290
 BLUESKY_ID=
 BLUESKY_PASS=
+LOG_LEVEL=debug
 ```
 
 ### Build
