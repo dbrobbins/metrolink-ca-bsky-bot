@@ -6,7 +6,7 @@ export function getPtNow() {
 }
 
 export function toPtString(date: Date): string {
-    return date.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
+    return date.toLocaleString('en-US', { timeZone: 'America/Los_Angeles', dateStyle: 'short', timeStyle: 'short' });
 }
 
 export function msElapsedSince(timestampMs: number) {
@@ -48,6 +48,14 @@ export function chunkMessage(message: string, chunkSize: number): string[] {
     }
 
     return chunks;
+}
+
+export function jitterInterval(callback: () => void, intervalMinMs: number, jitterMs: number) {
+    // guarantee that we wait the min interval
+    setInterval(() => {
+        // then add a random wait between zero and the jitter interval
+        setTimeout(callback, Math.floor(Math.random() * jitterMs));
+    }, intervalMinMs);
 }
 
 export class Logger {

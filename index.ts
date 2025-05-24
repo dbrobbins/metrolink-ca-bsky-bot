@@ -4,8 +4,9 @@ import * as util from './general-util';
 import * as apiUtil from './api-object-util';
 import { ActivePeriod, AdvisoryPost, GetAdvisoriesResponse, Line, Lines, ServiceAlert, Translation, TRANSLATION_EN } from './types';
 
+const RUN_INTERVAL_JITTER_MS: number = process.env.RUN_INTERVAL_JITTER_MS ? parseInt(process.env.RUN_INTERVAL_JITTER_MS) : 30000;
 const RUN_INTERVAL_MINUTES: number = process.env.RUN_INTERVAL_MINUTES ? parseInt(process.env.RUN_INTERVAL_MINUTES) : 30;
-const RUN_INTERVAL_MS = RUN_INTERVAL_MINUTES * 60 * 1000;
+const RUN_INTERVAL_MS: number = RUN_INTERVAL_MINUTES * 60 * 1000;
 
 const logger: util.Logger = new util.Logger(process.env.LOG_LEVEL ?? "debug");
 
@@ -73,8 +74,8 @@ const getServiceAdvisories = (): Promise<any> => {
     logger.debug('fetching data');
     loopCount += 1;
 
-    // plain GET with manual cache-busting by adding to the lines arg
-    return fetch(`${serviceUrlWithQuery}&lines=${loopCount}`)
+    // always check server for new data according to cache headers
+    return fetch(serviceUrlWithQuery, { cache: 'no-cache' })
         .then(response => {
             logger.debug('cf-cache-status', response.headers.get("cf-cache-status"), 'date', response.headers.get('date'));
             return response.json();
@@ -87,22 +88,32 @@ const getServiceAdvisories = (): Promise<any> => {
 
 const getPostsFromServiceAlerts = (serviceAlerts: ServiceAlert[]): AdvisoryPost[] => {
     return serviceAlerts
+        // filter out things we know we've already posted or rejected for posting
+        .filter(serviceAlert => {
+            const keep = knownPostedIds.indexOf(serviceAlert.Id) < 0;
+            if (!keep) {
+                logger.debug('not posting: already posted or rejected', serviceAlert.Id);
+            }
+            return keep;
+        })
         // filter to lines we care about
         .filter(serviceAlert => {
             const keep = getAffectedLines(serviceAlert).length > 0;
-            if (!keep) logger.debug('not posting: affected lines are not in lines to post', serviceAlert.Id);
+            if (!keep) {
+                // don't have to check this alert again this run
+                knownPostedIds.push(serviceAlert.Id);
+                logger.debug('not posting: affected lines are not in lines to post', serviceAlert.Id);
+            }
             return keep;
         })
         // filter out non-english alerts
         .filter(serviceAlert => {
             const keep = apiUtil.getEnHeader(serviceAlert) !== undefined;
-            if (!keep) logger.debug('not posting: message empty', serviceAlert.Id);
-            return keep;
-        })
-        // filter out things we already posted during this run
-        .filter(serviceAlert => {
-            const keep = knownPostedIds.indexOf(serviceAlert.Id) < 0;
-            if (!keep) logger.debug('not posting: already posted', serviceAlert.Id);
+            if (!keep) {
+                // don't have to check this alert again this run
+                knownPostedIds.push(serviceAlert.Id);
+                logger.debug('not posting: header empty', serviceAlert.Id);
+            }
             return keep;
         })
         // filter out things that weren't posted since the last time we ran
@@ -114,13 +125,23 @@ const getPostsFromServiceAlerts = (serviceAlerts: ServiceAlert[]): AdvisoryPost[
 
             // turns out the advisories page can be >5 minutes behind, so check against startup time too
             const activePeriodSinceStartup = apiUtil.getActivePeriodSinceStartup(serviceAlert.Alert.ActivePeriod, startUpDate.getTime(), logger);
-            // being inside startup interval only matters if also not posted
-            const notPosted = knownPostedIds.indexOf(serviceAlert.Id) < 0;
 
-            logger.debug('age check: inside run interval?', currentRunActivePeriod !== undefined, serviceAlert.Id);
-            logger.debug('age check: inside startup interval?', activePeriodSinceStartup !== undefined, serviceAlert.Id);
-            logger.debug('age check: not posted?', notPosted, serviceAlert.Id);
-            return currentRunActivePeriod !== undefined || (activePeriodSinceStartup !== undefined && notPosted);
+            const keep = currentRunActivePeriod !== undefined || activePeriodSinceStartup !== undefined;
+
+            if (!keep) {
+                // if there's only one active period and we aren't in it, then we don't have to check this alert again this run
+                if (serviceAlert.Alert.ActivePeriod.length === 1) {
+                    knownPostedIds.push(serviceAlert.Id);
+                }
+                if (currentRunActivePeriod === undefined) {
+                    logger.debug('not posting: no active period within current run interval', serviceAlert.Id);
+                }
+                if (activePeriodSinceStartup === undefined) {
+                    logger.debug('not posting: no active period within startup period', serviceAlert.Id);
+                }
+            }
+
+            return keep;
         })
         .flatMap(serviceAlert => {
             let message = `${apiUtil.getEnHeader(serviceAlert).Text}`;
@@ -133,7 +154,7 @@ const getPostsFromServiceAlerts = (serviceAlerts: ServiceAlert[]): AdvisoryPost[
             // Since we can end up posting on a delay, always include the post time.
             const currentActivePeriod = apiUtil.getCurrentActivePeriod(serviceAlert.Alert.ActivePeriod, RUN_INTERVAL_MS, startUpDate.getTime(), logger);
             if (currentActivePeriod) {
-                message += ` (${util.toPtString(new Date(currentActivePeriod.Start * 1000))})`;
+                message += ` (${apiUtil.activePeriodStartToPtString(currentActivePeriod)})`;
             }
 
             const affectedLines = getAffectedLines(serviceAlert);
@@ -208,7 +229,7 @@ const postAll = async (posts: AdvisoryPost[]): Promise<string[]> => {
     }
 }
 
-function online() {
+const online = (): boolean => {
     const now = util.getPtNow();
     const currentHour = now.getHours();
     const currentMinute = now.getMinutes();
@@ -223,9 +244,9 @@ function online() {
     return currentHour >= 4 && !(currentHour === 23 && currentMinute > 30);
 }
 
-function main() {
+function main(): void {
     logger.info('loop count', loopCount);
-    logger.info('post count', knownPostedIds.length);
+    logger.info('post/reject count', knownPostedIds.length);
 
     // don't make requests when things aren't getting posted
     if (!online()) {
@@ -247,8 +268,7 @@ function main() {
                 const serviceAlerts = (json as GetAdvisoriesResponse).Alerts.ServiceAlerts;
                 logger.debug('received advisories with ids', serviceAlerts.map(serviceAlert => serviceAlert.Id).join(','));
                 logger.debug('received advisories for lines', serviceAlerts
-                    .flatMap(serviceAlert => serviceAlert.Alert)
-                    .flatMap(alert => alert.InformedEntity)
+                    .flatMap(serviceAlert => serviceAlert.Alert.InformedEntity)
                     .map(informedEntity => informedEntity.Id)
                     .filter(id => id !== 0)
                     .join(','));
@@ -258,6 +278,8 @@ function main() {
                 if (posts.length > 0) {
                     logger.debug('posting all', posts.join(','));
                     logger.info('posting count', posts.length);
+                } else {
+                    logger.debug('nothing to post');
                 }
                 return postAll(posts);
             })
@@ -279,7 +301,7 @@ function main() {
 main();
 
 if (linesToPost.length > 0) {
-    setInterval(main, RUN_INTERVAL_MS);
+    util.jitterInterval(main, RUN_INTERVAL_MS, RUN_INTERVAL_JITTER_MS);
 } else {
     logger.error('env has empty set of lines to post');
 }

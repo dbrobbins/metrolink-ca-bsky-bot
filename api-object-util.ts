@@ -1,6 +1,10 @@
 import * as util from "./general-util";
 import { ActivePeriod, ServiceAlert, Translation, TRANSLATION_EN } from "./types";
 
+export function activePeriodStartToPtString(activePeriod: ActivePeriod): string {
+    return util.toPtString(new Date(activePeriod.Start * 1000));
+}
+
 export function activePeriodsByStart(a: ActivePeriod, b: ActivePeriod): number {
     if (!a.Start && !b.Start) {
         return 0;
