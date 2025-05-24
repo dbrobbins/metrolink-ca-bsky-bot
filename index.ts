@@ -74,8 +74,8 @@ const getServiceAdvisories = (): Promise<any> => {
     logger.debug('fetching data');
     loopCount += 1;
 
-    // always check server for new data according to cache headers
-    return fetch(serviceUrlWithQuery, { cache: 'no-cache' })
+    // plain GET with manual cache-busting by adding to the lines arg
+    return fetch(`${serviceUrlWithQuery}&lines=${loopCount}`)
         .then(response => {
             logger.debug('cf-cache-status', response.headers.get("cf-cache-status"), 'date', response.headers.get('date'));
             return response.json();
