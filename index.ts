@@ -2,11 +2,7 @@ import { AtpAgent, AtpSessionData, AtpSessionEvent } from "@atproto/api";
 import { RESPONSE } from './test';
 import * as util from './general-util';
 import * as apiUtil from './api-object-util';
-import { ActivePeriod, AdvisoryPost, GetAdvisoriesResponse, Line, Lines, ServiceAlert, Translation, TRANSLATION_EN } from './types';
-
-const RUN_INTERVAL_JITTER_MS: number = process.env.RUN_INTERVAL_JITTER_MS ? parseInt(process.env.RUN_INTERVAL_JITTER_MS) : 30000;
-const RUN_INTERVAL_MINUTES: number = process.env.RUN_INTERVAL_MINUTES ? parseInt(process.env.RUN_INTERVAL_MINUTES) : 30;
-const RUN_INTERVAL_MS: number = RUN_INTERVAL_MINUTES * 60 * 1000;
+import { AdvisoryPost, ContentEqualitySet, GetAdvisoriesResponse, Line, Lines, ServiceAlert } from './types';
 
 const logger: util.Logger = new util.Logger(process.env.LOG_LEVEL ?? "debug");
 
@@ -25,6 +21,10 @@ const linesToPost = (() => {
     return toPost;
 })();
 logger.info('lines to post', linesToPost.join(','));
+const runIntervalJitterMs: number = process.env.RUN_INTERVAL_JITTER_MS ? parseInt(process.env.RUN_INTERVAL_JITTER_MS) : 30000;
+const runIntervalMinutes: number = process.env.RUN_INTERVAL_MINUTES ? parseInt(process.env.RUN_INTERVAL_MINUTES) : 30;
+const runIntervalMs: number = runIntervalMinutes * 60 * 1000;
+logger.info('run interval (minutes)', runIntervalMinutes, 'run interval jitter (ms)', runIntervalJitterMs);
 const serviceUrl: string = process.env.SERVICE_URL ?? '';
 logger.info('service url', serviceUrl);
 const serviceUrlWithQuery = serviceUrl + '?lines=' + linesToPost.join('&lines=');
@@ -86,7 +86,7 @@ const getServiceAdvisories = (): Promise<any> => {
         });
 }
 
-const getPostsFromServiceAlerts = (serviceAlerts: ServiceAlert[]): AdvisoryPost[] => {
+const filterToRelevantAlerts = (serviceAlerts: ServiceAlert[]): ServiceAlert[] => {
     return serviceAlerts
         // filter out things we know we've already posted or rejected for posting
         .filter(serviceAlert => {
@@ -121,7 +121,7 @@ const getPostsFromServiceAlerts = (serviceAlerts: ServiceAlert[]): AdvisoryPost[
             // sort active periods by start, in descending order
             serviceAlert.Alert.ActivePeriod.sort(apiUtil.activePeriodsByStart).reverse();
 
-            const currentRunActivePeriod = apiUtil.getCurrentRunActivePeriod(serviceAlert.Alert.ActivePeriod, RUN_INTERVAL_MS, logger);
+            const currentRunActivePeriod = apiUtil.getCurrentRunActivePeriod(serviceAlert.Alert.ActivePeriod, runIntervalMs, logger);
 
             // turns out the advisories page can be >5 minutes behind, so check against startup time too
             const activePeriodSinceStartup = apiUtil.getActivePeriodSinceStartup(serviceAlert.Alert.ActivePeriod, startUpDate.getTime(), logger);
@@ -142,44 +142,43 @@ const getPostsFromServiceAlerts = (serviceAlerts: ServiceAlert[]): AdvisoryPost[
             }
 
             return keep;
-        })
-        .flatMap(serviceAlert => {
-            let message = `${apiUtil.getEnHeader(serviceAlert).Text}`;
-
-            const description = apiUtil.getEnDescription(serviceAlert);
-            if (description) {
-                message += ` ${description.Text}`;
-            }
-
-            // Since we can end up posting on a delay, always include the post time.
-            const currentActivePeriod = apiUtil.getCurrentActivePeriod(serviceAlert.Alert.ActivePeriod, RUN_INTERVAL_MS, startUpDate.getTime(), logger);
-            if (currentActivePeriod) {
-                message += ` (${apiUtil.activePeriodStartToPtString(currentActivePeriod)})`;
-            }
-
-            const affectedLines = getAffectedLines(serviceAlert);
-            const posts: AdvisoryPost[] = [];
-
-            affectedLines.forEach((line: Line) => {
-                // If the message doesn't include the line, then we'll add our short name
-                if (message.indexOf(line.externalId) < 0) {
-                    message = `(${line.shortName}) ${message}`;
-                }
-
-                if (message.length > maxPostLength) {
-                    const chunks = util.chunkMessage(message, maxPostLength);
-
-                    chunks.forEach((chunk: string, index: number) => {
-                        const chunkedMessage = `(${index + 1}/${chunks.length}) ${chunk}`;
-                        posts.push(new AdvisoryPost(serviceAlert.Id, chunkedMessage));
-                    });
-                } else {
-                    posts.push(new AdvisoryPost(serviceAlert.Id, message));
-                }
-            });
-
-            return posts;
         });
+}
+
+const convertAlertsToPosts = (serviceAlerts: ServiceAlert[]): AdvisoryPost[] => {
+    return serviceAlerts.flatMap(serviceAlert => {
+        let message = `${apiUtil.getEnHeader(serviceAlert).Text}`;
+
+        const description = apiUtil.getEnDescription(serviceAlert);
+        if (description) {
+            message += ` ${description.Text}`;
+        }
+
+        const affectedLines = getAffectedLines(serviceAlert);
+        // Maintain a content-comparing set so we don't post the exact same message across multiple lines,
+        // ie when post contains all line names already and does not require differentiation.
+        const posts = new ContentEqualitySet<AdvisoryPost>();
+
+        affectedLines.forEach((line: Line) => {
+            // If the message doesn't include the line, then we'll add our short name
+            if (message.indexOf(line.externalId) < 0) {
+                message = `(${line.shortName}) ${message}`;
+            }
+
+            if (message.length > maxPostLength) {
+                const chunks = util.chunkMessage(message, maxPostLength);
+
+                chunks.forEach((chunk: string, index: number) => {
+                    const chunkedMessage = `(${index + 1}/${chunks.length}) ${chunk}`;
+                    posts.add(new AdvisoryPost(serviceAlert.Id, chunkedMessage));
+                });
+            } else {
+                posts.add(new AdvisoryPost(serviceAlert.Id, message));
+            }
+        });
+
+        return posts.values();
+    });
 }
 
 const postAll = async (posts: AdvisoryPost[]): Promise<string[]> => {
@@ -272,8 +271,9 @@ function main(): void {
                     .map(informedEntity => informedEntity.Id)
                     .filter(id => id !== 0)
                     .join(','));
-                return getPostsFromServiceAlerts(serviceAlerts);
+                return filterToRelevantAlerts(serviceAlerts);
             })
+            .then(convertAlertsToPosts)
             .then(posts => {
                 if (posts.length > 0) {
                     logger.debug('posting all', posts.join(','));
@@ -301,7 +301,7 @@ function main(): void {
 main();
 
 if (linesToPost.length > 0) {
-    util.jitterInterval(main, RUN_INTERVAL_MS, RUN_INTERVAL_JITTER_MS);
+    util.jitterInterval(main, runIntervalMs, runIntervalJitterMs);
 } else {
     logger.error('env has empty set of lines to post');
 }

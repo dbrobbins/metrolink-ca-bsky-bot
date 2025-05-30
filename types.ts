@@ -34,14 +34,6 @@ export class Lines {
         }
     }
 
-    static getLineByExternalId(externalId: string): Line | undefined {
-        for (let line of Lines.ALL) {
-            if (line.externalId === externalId) {
-                return line;
-            }
-        }
-    }
-
     static getLineByDatabaseId(databaseId: number): Line | undefined {
         for (let line of Lines.ALL) {
             if (line.databaseId === databaseId) {
@@ -99,7 +91,7 @@ export type Translation = {
     'Language': string
 }
 
-export class AdvisoryPost {
+export class AdvisoryPost implements ContentComparable<AdvisoryPost> {
     public readonly id: string;
     public readonly message: string;
 
@@ -108,7 +100,33 @@ export class AdvisoryPost {
         this.message = message;
     }
 
-    toString(): string {
+    public toString(): string {
         return `{ AdvisoryPost: ${this.id}: ${this.message} }`;
+    }
+
+    public contentEquals(other: AdvisoryPost): boolean {
+        return this.message === other.message;
+    }
+}
+
+export interface ContentComparable<T> {
+    contentEquals: (other: T) => boolean
+}
+
+export class ContentEqualitySet<T extends ContentComparable<T>> {
+    private items: T[] = [];
+
+    add(item: T): void {
+        if (!this.has(item)) {
+            this.items.push(item);
+        }
+    }
+
+    has(item: T): boolean {
+        return this.items.some(existing => existing.contentEquals(item));
+    }
+
+    values(): T[] {
+        return [...this.items];
     }
 }
