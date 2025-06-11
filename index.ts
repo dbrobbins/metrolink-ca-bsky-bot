@@ -121,7 +121,9 @@ const filterToRelevantAlerts = (serviceAlerts: ServiceAlert[]): ServiceAlert[] =
             // sort active periods by start, in descending order
             serviceAlert.Alert.ActivePeriod.sort(apiUtil.activePeriodsByStart).reverse();
 
-            const currentRunActivePeriod = apiUtil.getCurrentRunActivePeriod(serviceAlert.Alert.ActivePeriod, runIntervalMs, logger);
+            // account for jitter as well
+            const runIntervalWithJitterMs = runIntervalMs + runIntervalJitterMs;
+            const currentRunActivePeriod = apiUtil.getCurrentRunActivePeriod(serviceAlert.Alert.ActivePeriod, runIntervalWithJitterMs, logger);
 
             // turns out the advisories page can be >5 minutes behind, so check against startup time too
             const activePeriodSinceStartup = apiUtil.getActivePeriodSinceStartup(serviceAlert.Alert.ActivePeriod, startUpDate.getTime(), logger);
@@ -147,19 +149,19 @@ const filterToRelevantAlerts = (serviceAlerts: ServiceAlert[]): ServiceAlert[] =
 
 const convertAlertsToPosts = (serviceAlerts: ServiceAlert[]): AdvisoryPost[] => {
     return serviceAlerts.flatMap(serviceAlert => {
-        let message = `${apiUtil.getEnHeader(serviceAlert).Text}`;
-
-        const description = apiUtil.getEnDescription(serviceAlert);
-        if (description) {
-            message += ` ${description.Text}`;
-        }
-
         const affectedLines = getAffectedLines(serviceAlert);
         // Maintain a content-comparing set so we don't post the exact same message across multiple lines,
         // ie when post contains all line names already and does not require differentiation.
         const posts = new ContentEqualitySet<AdvisoryPost>();
 
         affectedLines.forEach((line: Line) => {
+            let message = `${apiUtil.getEnHeader(serviceAlert).Text}`;
+
+            const description = apiUtil.getEnDescription(serviceAlert);
+            if (description) {
+                message += ` ${description.Text}`;
+            }
+
             // If the message doesn't include the line, then we'll add our short name
             if (message.indexOf(line.externalId) < 0) {
                 message = `(${line.shortName}) ${message}`;
