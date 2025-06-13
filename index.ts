@@ -47,8 +47,7 @@ const agent = new AtpAgent({
 });
 const startUpDate = new Date();
 let loopCount = 0;
-let knownPostedIds: string[] = [];
-let isOnline = false;
+let knownPostedIds = new Set<string>();
 
 const getAffectedLines = (serviceAlert: ServiceAlert): Line[] => {
     return serviceAlert.Alert.InformedEntity
@@ -90,7 +89,7 @@ const filterToRelevantAlerts = (serviceAlerts: ServiceAlert[]): ServiceAlert[] =
     return serviceAlerts
         // filter out things we know we've already posted or rejected for posting
         .filter(serviceAlert => {
-            const keep = knownPostedIds.indexOf(serviceAlert.Id) < 0;
+            const keep = !knownPostedIds.has(serviceAlert.Id);
             if (!keep) {
                 logger.debug('not posting: already posted or rejected', serviceAlert.Id);
             }
@@ -101,7 +100,7 @@ const filterToRelevantAlerts = (serviceAlerts: ServiceAlert[]): ServiceAlert[] =
             const keep = getAffectedLines(serviceAlert).length > 0;
             if (!keep) {
                 // don't have to check this alert again this run
-                knownPostedIds.push(serviceAlert.Id);
+                knownPostedIds.add(serviceAlert.Id);
                 logger.debug('not posting: affected lines are not in lines to post', serviceAlert.Id);
             }
             return keep;
@@ -111,7 +110,7 @@ const filterToRelevantAlerts = (serviceAlerts: ServiceAlert[]): ServiceAlert[] =
             const keep = apiUtil.getEnHeader(serviceAlert) !== undefined;
             if (!keep) {
                 // don't have to check this alert again this run
-                knownPostedIds.push(serviceAlert.Id);
+                knownPostedIds.add(serviceAlert.Id);
                 logger.debug('not posting: header empty', serviceAlert.Id);
             }
             return keep;
@@ -133,7 +132,7 @@ const filterToRelevantAlerts = (serviceAlerts: ServiceAlert[]): ServiceAlert[] =
             if (!keep) {
                 // if there's only one active period and we aren't in it, then we don't have to check this alert again this run
                 if (serviceAlert.Alert.ActivePeriod.length === 1) {
-                    knownPostedIds.push(serviceAlert.Id);
+                    knownPostedIds.add(serviceAlert.Id);
                 }
                 if (currentRunActivePeriod === undefined) {
                     logger.debug('not posting: no active period within current run interval', serviceAlert.Id);
@@ -154,10 +153,12 @@ const convertAlertsToPosts = (serviceAlerts: ServiceAlert[]): AdvisoryPost[] => 
         // ie when post contains all line names already and does not require differentiation.
         const posts = new ContentEqualitySet<AdvisoryPost>();
 
-        affectedLines.forEach((line: Line) => {
-            let message = `${apiUtil.getEnHeader(serviceAlert).Text}`;
+        const header = `${apiUtil.getEnHeader(serviceAlert).Text}`;
+        const description = apiUtil.getEnDescription(serviceAlert);
 
-            const description = apiUtil.getEnDescription(serviceAlert);
+        affectedLines.forEach((line: Line) => {
+            let message = `${header}`;
+
             if (description) {
                 message += ` ${description.Text}`;
             }
@@ -171,8 +172,8 @@ const convertAlertsToPosts = (serviceAlerts: ServiceAlert[]): AdvisoryPost[] => 
                 const chunks = util.chunkMessage(message, maxPostLength);
 
                 chunks.forEach((chunk: string, index: number) => {
-                    const chunkedMessage = `(${index + 1}/${chunks.length}) ${chunk}`;
-                    posts.add(new AdvisoryPost(serviceAlert.Id, chunkedMessage));
+                    const messageChunk = `(${index + 1}/${chunks.length}) ${chunk}`;
+                    posts.add(new AdvisoryPost(serviceAlert.Id, messageChunk));
                 });
             } else {
                 posts.add(new AdvisoryPost(serviceAlert.Id, message));
@@ -230,38 +231,9 @@ const postAll = async (posts: AdvisoryPost[]): Promise<string[]> => {
     }
 }
 
-const online = (): boolean => {
-    const now = util.getPtNow();
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
-    const currentDay = now.getDay();
-
-    // Sat / Sun 6a-11p
-    if (currentDay === 6 || currentDay === 0) {
-        return currentHour >= 6 && currentHour < 23;
-    }
-
-    // Mon-Fri 4a-11:30p
-    return currentHour >= 4 && !(currentHour === 23 && currentMinute > 30);
-}
-
 function main(): void {
     logger.info('loop count', loopCount);
-    logger.info('post/reject count', knownPostedIds.length);
-
-    // don't make requests when things aren't getting posted
-    if (!online()) {
-        if (isOnline) {
-            isOnline = false;
-            logger.info('going offline...');
-        }
-        return;
-    }
-
-    if (!isOnline) {
-        isOnline = true;
-        logger.info('coming online...');
-    }
+    logger.info('post/reject count', knownPostedIds.size);
 
     try {
         getServiceAdvisories()
@@ -289,7 +261,7 @@ function main(): void {
                 if (postedIds.length > 0) {
                     logger.info('marking posted', postedIds.join(','));
                 }
-                postedIds.forEach(id => knownPostedIds.push(id));
+                postedIds.forEach(id => knownPostedIds.add(id));
             });
     } catch (e) {
         if (e instanceof Error) {
