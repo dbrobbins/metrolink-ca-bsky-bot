@@ -46,6 +46,7 @@ const agent = new AtpAgent({
     }
 });
 const startUpDate = new Date();
+let lastRunDate = new Date((new Date()).getTime() - runIntervalMs);
 let loopCount = 0;
 let knownPostedIds = new Set<string>();
 
@@ -121,8 +122,8 @@ const filterToRelevantAlerts = (serviceAlerts: ServiceAlert[]): ServiceAlert[] =
             serviceAlert.Alert.ActivePeriod.sort(apiUtil.activePeriodsByStart).reverse();
 
             // account for jitter as well
-            const runIntervalWithJitterMs = runIntervalMs + runIntervalJitterMs;
-            const currentRunActivePeriod = apiUtil.getCurrentRunActivePeriod(serviceAlert.Alert.ActivePeriod, runIntervalWithJitterMs, logger);
+            const lastRunInterval = util.msElapsedSince(lastRunDate.getTime());
+            const currentRunActivePeriod = apiUtil.getCurrentRunActivePeriod(serviceAlert.Alert.ActivePeriod, lastRunInterval, logger);
 
             // turns out the advisories page can be >5 minutes behind, so check against startup time too
             const activePeriodSinceStartup = apiUtil.getActivePeriodSinceStartup(serviceAlert.Alert.ActivePeriod, startUpDate.getTime(), logger);
@@ -235,41 +236,42 @@ function main(): void {
     logger.info('loop count', loopCount);
     logger.info('post/reject count', knownPostedIds.size);
 
-    try {
-        getServiceAdvisories()
-            .then(json => {
-                const serviceAlerts = (json as GetAdvisoriesResponse).Alerts.ServiceAlerts;
-                logger.debug('received advisories with ids', serviceAlerts.map(serviceAlert => serviceAlert.Id).join(','));
-                logger.debug('received advisories for lines', serviceAlerts
-                    .flatMap(serviceAlert => serviceAlert.Alert.InformedEntity)
-                    .map(informedEntity => informedEntity.Id)
-                    .filter(id => id !== 0)
-                    .join(','));
-                return filterToRelevantAlerts(serviceAlerts);
-            })
-            .then(convertAlertsToPosts)
-            .then(posts => {
-                if (posts.length > 0) {
-                    logger.debug('posting all', posts.join(','));
-                    logger.info('posting count', posts.length);
-                } else {
-                    logger.debug('nothing to post');
-                }
-                return postAll(posts);
-            })
-            .then(postedIds => {
-                if (postedIds.length > 0) {
-                    logger.info('marking posted', postedIds.join(','));
-                }
-                postedIds.forEach(id => knownPostedIds.add(id));
-            });
-    } catch (e) {
-        if (e instanceof Error) {
-            logger.error(e.message);
-        } else {
-            logger.error(e);
-        }
-    }
+    getServiceAdvisories()
+        .then(json => {
+            const serviceAlerts = (json as GetAdvisoriesResponse).Alerts.ServiceAlerts;
+            logger.debug('received advisories with ids', serviceAlerts.map(serviceAlert => serviceAlert.Id).join(','));
+            logger.debug('received advisories for lines', serviceAlerts
+                .flatMap(serviceAlert => serviceAlert.Alert.InformedEntity)
+                .map(informedEntity => informedEntity.Id)
+                .filter(id => id !== 0)
+                .join(','));
+            return filterToRelevantAlerts(serviceAlerts);
+        })
+        .then(convertAlertsToPosts)
+        .then(posts => {
+            if (posts.length > 0) {
+                logger.debug('posting all', posts.join(','));
+                logger.info('posting count', posts.length);
+            } else {
+                logger.debug('nothing to post');
+            }
+            return postAll(posts);
+        })
+        .then(postedIds => {
+            if (postedIds.length > 0) {
+                logger.info('marking posted', postedIds.join(','));
+            }
+            postedIds.forEach(id => knownPostedIds.add(id));
+
+            lastRunDate = new Date();
+        })
+        .catch(e => {
+            if (e instanceof Error) {
+                logger.error(e.message);
+            } else {
+                logger.error(e);
+            }
+        });
 }
 
 main();
