@@ -119,20 +119,21 @@ const filterToRelevantAlerts = (serviceAlerts: ServiceAlert[]): ServiceAlert[] =
         // filter out things that weren't posted since the last time we ran
         .filter(serviceAlert => {
             // sort active periods by start, in descending order
-            serviceAlert.Alert.ActivePeriod.sort(apiUtil.activePeriodsByStart).reverse();
+            serviceAlert.Alert.ActivePeriod?.sort(apiUtil.activePeriodsByStart).reverse();
 
-            // account for jitter as well
+            // account for jitter to check if current run is in an active period
             const lastRunInterval = util.msElapsedSince(lastRunDate.getTime());
             const currentRunActivePeriod = apiUtil.getCurrentRunActivePeriod(serviceAlert.Alert.ActivePeriod, lastRunInterval, logger);
 
-            // turns out the advisories page can be >5 minutes behind, so check against startup time too
+            // check against start up time as well in case caching made us miss something
             const activePeriodSinceStartup = apiUtil.getActivePeriodSinceStartup(serviceAlert.Alert.ActivePeriod, startUpDate.getTime(), logger);
 
-            const keep = currentRunActivePeriod !== undefined || activePeriodSinceStartup !== undefined;
+            // explicitly keep if there is no active period so that we'll post it at least once
+            const keep = !serviceAlert.Alert.ActivePeriod || currentRunActivePeriod !== undefined || activePeriodSinceStartup !== undefined;
 
             if (!keep) {
                 // if there's only one active period and we aren't in it, then we don't have to check this alert again this run
-                if (serviceAlert.Alert.ActivePeriod.length === 1) {
+                if (!serviceAlert.Alert.ActivePeriod || serviceAlert.Alert.ActivePeriod.length === 1) {
                     knownPostedIds.add(serviceAlert.Id);
                 }
                 if (currentRunActivePeriod === undefined) {
@@ -205,7 +206,7 @@ const postAll = async (posts: AdvisoryPost[]): Promise<string[]> => {
         }
 
         return Promise.all(posts.map(async (post, index) => {
-            // force a wait
+            // force a wait between posts
             await new Promise(resolve => setTimeout(resolve, 500 * index));
 
             if (postingEnabled) {
@@ -238,14 +239,15 @@ function main(): void {
 
     getServiceAdvisories()
         .then(json => {
-            const serviceAlerts = (json as GetAdvisoriesResponse).Alerts.ServiceAlerts;
-            logger.debug('received advisories with ids', serviceAlerts.map(serviceAlert => serviceAlert.Id).join(','));
-            logger.debug('received advisories for lines', serviceAlerts
+            const response = (json as GetAdvisoriesResponse);
+            const serviceAndBannerAlerts = [...response.Alerts.ServiceAlerts, ...response.Alerts.BannerAlerts];
+            logger.debug('received advisories with ids', serviceAndBannerAlerts.map(serviceAlert => serviceAlert.Id).join(','));
+            logger.debug('received advisories for lines', serviceAndBannerAlerts
                 .flatMap(serviceAlert => serviceAlert.Alert.InformedEntity)
                 .map(informedEntity => informedEntity.Id)
                 .filter(id => id !== 0)
                 .join(','));
-            return filterToRelevantAlerts(serviceAlerts);
+            return filterToRelevantAlerts(serviceAndBannerAlerts);
         })
         .then(convertAlertsToPosts)
         .then(posts => {

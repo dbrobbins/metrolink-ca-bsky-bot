@@ -13,18 +13,28 @@ export function msElapsedSince(timestampMs: number) {
     return (new Date()).getTime() - timestampMs;
 }
 
-export function timestampInIntervalMs(timestampS: number, intervalMs: number, logger?: Logger): boolean {
+export function timestampSIsInFuture(timestampS: number): boolean {
+    return (new Date()).getTime() < (new Date(timestampS * 1000)).getTime();
+}
+
+export function timestampInIntervalFromNowMs(timestampS: number, intervalMs: number, logger?: Logger): boolean {
     const now = new Date();
-    const postDate = new Date(timestampS * 1000);
     const intervalEnd = now.getTime();
     const intervalStart = intervalEnd - intervalMs;
+
+    return timestampInIntervalMs(timestampS, intervalStart, intervalEnd, logger);
+}
+
+export function timestampInIntervalMs(timestampS: number, intervalStartMs: number, intervalEndMs: number, logger?: Logger): boolean {
+    const now = new Date();
+    const postDate = new Date(timestampS * 1000);
     const postTime = postDate.getTime();
 
     if (logger) {
-        logger.debug('now', now.toISOString(), 'postDate', postDate.toISOString(), 'postTime', postTime, 'range', intervalStart, '-', intervalEnd);
+        logger.debug('now', now.toISOString(), 'postDate', postDate.toISOString(), 'postTime', postTime, 'range', intervalStartMs, '-', intervalEndMs);
     }
 
-    return postTime >= intervalStart && postTime <= intervalEnd;
+    return postTime >= intervalStartMs && postTime <= intervalEndMs;
 }
 
 export function chunkMessage(message: string, chunkSize: number): string[] {

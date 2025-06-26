@@ -49,8 +49,8 @@ export type GetAdvisoriesResponse = {
 
 export type Alert = {
     // 'PlannedAlerts'
-    'ServiceAlerts': ServiceAlert[]
-    // 'BannerAlerts'
+    'ServiceAlerts': ServiceAlert[],
+    'BannerAlerts': ServiceAlert[],
     'Errored': boolean  // error is oddly nested
 }
 
@@ -60,14 +60,15 @@ export type ServiceAlert = {
 }
 
 export type AlertDetail = {
-    'ActivePeriod': ActivePeriod[]
+    'ActivePeriod': ActivePeriod[] | null,
     'InformedEntity': InformedEntity[],
     'HeaderText': AlertText,
     'DescriptionText': AlertText
 }
 
 export type ActivePeriod = {
-    'Start': number // timestamp (seconds)
+    'Start': number | null, // timestamp (seconds)
+    'End': number | null    // timestamp (seconds)
 }
 
 /**

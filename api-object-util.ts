@@ -1,11 +1,19 @@
 import * as util from "./general-util";
 import { ActivePeriod, ServiceAlert, Translation, TRANSLATION_EN } from "./types";
 
-export function activePeriodStartToPtString(activePeriod: ActivePeriod): string {
-    return util.toPtString(new Date(activePeriod.Start * 1000));
-}
-
 export function activePeriodsByStart(a: ActivePeriod, b: ActivePeriod): number {
+    if (!a && !b) {
+        return 0;
+    }
+
+    if (!b) {
+        return 1;
+    }
+
+    if (!a) {
+        return -1;
+    }
+
     if (!a.Start && !b.Start) {
         return 0;
     }
@@ -18,6 +26,7 @@ export function activePeriodsByStart(a: ActivePeriod, b: ActivePeriod): number {
         return -1;
     }
 
+    // @ts-ignore cannot be null at this point, why you yellin'?
     return a.Start - b.Start;
 }
 
@@ -32,10 +41,21 @@ export function getCurrentActivePeriod(activePeriods: ActivePeriod[], runInterva
  * Returns the active period that's inside the current run interval, or
  * undefined.
  */
-export function getCurrentRunActivePeriod(activePeriods: ActivePeriod[], intervalMs: number, logger?: util.Logger): ActivePeriod | undefined {
+export function getCurrentRunActivePeriod(activePeriods: ActivePeriod[] | null, intervalMs: number, logger?: util.Logger): ActivePeriod | undefined {
+    if (!activePeriods) {
+        return;
+    }
+
     for (const activePeriod of activePeriods) {
-        if (util.timestampInIntervalMs(activePeriod.Start, intervalMs, logger)) {
-            return activePeriod;
+        if (activePeriod.Start) {
+            if (util.timestampInIntervalFromNowMs(activePeriod.Start, intervalMs, logger)) {
+                return activePeriod;
+            }
+        } else {
+            // no start, check against end
+            if (activePeriod.End && util.timestampSIsInFuture(activePeriod.End)) {
+                return activePeriod;
+            }
         }
     }
 }
@@ -46,11 +66,23 @@ export function getCurrentRunActivePeriod(activePeriods: ActivePeriod[], interva
  * Returns the active period that's inside the current start-up period, or
  * undefined.
  */
-export function getActivePeriodSinceStartup(activePeriods: ActivePeriod[], startUpTimestamp: number, logger?: util.Logger): ActivePeriod | undefined {
-    const msSinceStartup = util.msElapsedSince(startUpTimestamp);
+export function getActivePeriodSinceStartup(activePeriods: ActivePeriod[] | null, startUpTimestamp: number, logger?: util.Logger): ActivePeriod | undefined {
+    if (!activePeriods) {
+        return;
+    }
+
     for (const activePeriod of activePeriods) {
-        if (util.timestampInIntervalMs(activePeriod.Start, msSinceStartup, logger)) {
-            return activePeriod;
+        if (activePeriod.Start) {
+            const msSinceStartup = util.msElapsedSince(startUpTimestamp);
+            if (util.timestampInIntervalFromNowMs(activePeriod.Start, msSinceStartup, logger)) {
+                return activePeriod;
+            }
+        } else {
+            // no start, check against end
+            if (activePeriod.End && util.timestampSIsInFuture(activePeriod.End)) {
+                return activePeriod;
+            }
+
         }
     }
 }
