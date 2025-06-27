@@ -1,8 +1,8 @@
 import { AtpAgent, AtpSessionData, AtpSessionEvent } from "@atproto/api";
-import { RESPONSE } from './test';
 import * as util from './general-util';
 import * as apiUtil from './api-object-util';
-import { AdvisoryPost, ContentEqualitySet, GetAdvisoriesResponse, Line, Lines, ServiceAlert } from './types';
+import { AdvisoryPost, ContentEqualitySet, GetAdvisoriesResponse, GetAdvisoryResult, Line, Lines, ServiceAlert } from './types';
+import { readFileSync } from "fs";
 
 const logger: util.Logger = new util.Logger(process.env.LOG_LEVEL ?? "debug");
 
@@ -49,6 +49,8 @@ const startUpDate = new Date();
 let lastRunDate = new Date((new Date()).getTime() - runIntervalMs);
 let loopCount = 0;
 let knownPostedIds = new Set<string>();
+let erroredCount = 0;
+let errored = false;
 
 const getAffectedLines = (serviceAlert: ServiceAlert): Line[] => {
     return serviceAlert.Alert.InformedEntity
@@ -64,7 +66,13 @@ const getServiceAdvisories = (): Promise<any> => {
     // if using local env then return a promise that resolves our test data
     if (!dataRequestEnabled) {
         logger.warn('using local data');
-        return new Promise(resolve => resolve(JSON.parse(RESPONSE)));
+        return new Promise(resolve => {
+            try {
+                resolve(JSON.parse(readFileSync('./test.json', 'utf-8')));
+            } catch (error) {
+                resolve('failed to load test data');
+            }
+        });
     }
 
     if (!serviceUrl) {
@@ -72,8 +80,6 @@ const getServiceAdvisories = (): Promise<any> => {
     }
 
     logger.debug('fetching data');
-    loopCount += 1;
-
     // plain GET with manual cache-busting by adding to the lines arg
     return fetch(`${serviceUrlWithQuery}&lines=${loopCount}`)
         .then(response => {
@@ -148,42 +154,65 @@ const filterToRelevantAlerts = (serviceAlerts: ServiceAlert[]): ServiceAlert[] =
         });
 }
 
-const convertAlertsToPosts = (serviceAlerts: ServiceAlert[]): AdvisoryPost[] => {
-    return serviceAlerts.flatMap(serviceAlert => {
-        const affectedLines = getAffectedLines(serviceAlert);
-        // Maintain a content-comparing set so we don't post the exact same message across multiple lines,
-        // ie when post contains all line names already and does not require differentiation.
-        const posts = new ContentEqualitySet<AdvisoryPost>();
+const getPostsForAlert = (serviceAlert: ServiceAlert, postPrefix: string = ''): AdvisoryPost[] => {
+    const affectedLines = getAffectedLines(serviceAlert);
+    // Maintain a content-comparing set so we don't post the exact same message across multiple lines,
+    // ie when post contains all line names already and does not require differentiation.
+    const posts = new ContentEqualitySet<AdvisoryPost>();
 
-        const header = `${apiUtil.getEnHeader(serviceAlert).Text}`;
-        const description = apiUtil.getEnDescription(serviceAlert);
+    const header = `${apiUtil.getEnHeader(serviceAlert).Text}`;
+    const description = apiUtil.getEnDescription(serviceAlert);
 
-        affectedLines.forEach((line: Line) => {
-            let message = `${header}`;
+    affectedLines.forEach((line: Line) => {
+        let message = `${postPrefix}${header}`;
 
-            if (description) {
-                message += ` ${description.Text}`;
-            }
+        if (description) {
+            message += ` ${description.Text}`;
+        }
 
-            // If the message doesn't include the line, then we'll add our short name
-            if (message.indexOf(line.externalId) < 0) {
-                message = `(${line.shortName}) ${message}`;
-            }
+        // If the message doesn't include the line, then we'll add our short name
+        if (message.indexOf(line.externalId) < 0) {
+            message = `(${line.shortName}) ${message}`;
+        }
 
-            if (message.length > maxPostLength) {
-                const chunks = util.chunkMessage(message, maxPostLength);
+        if (message.length > maxPostLength) {
+            const chunks = util.chunkMessage(message, maxPostLength);
 
-                chunks.forEach((chunk: string, index: number) => {
-                    const messageChunk = `(${index + 1}/${chunks.length}) ${chunk}`;
-                    posts.add(new AdvisoryPost(serviceAlert.Id, messageChunk));
-                });
-            } else {
-                posts.add(new AdvisoryPost(serviceAlert.Id, message));
-            }
-        });
-
-        return posts.values();
+            chunks.forEach((chunk: string, index: number) => {
+                const messageChunk = `(${index + 1}/${chunks.length}) ${chunk}`;
+                posts.add(new AdvisoryPost(serviceAlert.Id, messageChunk));
+            });
+        } else {
+            posts.add(new AdvisoryPost(serviceAlert.Id, message));
+        }
     });
+
+    return posts.values();
+}
+
+const convertAdvisoryResultToPosts = (getAdvisoryResult: GetAdvisoryResult): AdvisoryPost[] => {
+    const posts: AdvisoryPost[] = [];
+
+    // If the result state is now errored, handle that by forming a special post
+    // Also limit this post to 10 times in an instance cycle, just in case it flip flops more than expected
+    if (getAdvisoryResult.errored && !errored && erroredCount < 10) {
+        errored = true;
+        erroredCount += 1;
+        posts.push(new AdvisoryPost(
+            `errorCount=${erroredCount}`,
+            '🤖 Per Metrolink, some service advisories may be temporarily unavailable. Posts will resume as soon as service is restored.'
+        ));
+    }
+
+    // We also need to remove our internal error state when things have returned to normal
+    if (!getAdvisoryResult.errored && errored) {
+        errored = false;
+    }
+
+    return posts.concat(
+        getAdvisoryResult.serviceAlerts.flatMap(serviceAlert => getPostsForAlert(serviceAlert)),
+        getAdvisoryResult.bannerAlerts.flatMap(bannerAlert => getPostsForAlert(bannerAlert, '(Priority Notice) '))
+    );
 }
 
 const postAll = async (posts: AdvisoryPost[]): Promise<string[]> => {
@@ -234,12 +263,15 @@ const postAll = async (posts: AdvisoryPost[]): Promise<string[]> => {
 }
 
 function main(): void {
+    loopCount += 1;
+
     logger.info('loop count', loopCount);
     logger.info('post/reject count', knownPostedIds.size);
 
     getServiceAdvisories()
         .then(json => {
             const response = (json as GetAdvisoriesResponse);
+
             const serviceAndBannerAlerts = [...response.Alerts.ServiceAlerts, ...response.Alerts.BannerAlerts];
             logger.debug('received advisories with ids', serviceAndBannerAlerts.map(serviceAlert => serviceAlert.Id).join(','));
             logger.debug('received advisories for lines', serviceAndBannerAlerts
@@ -247,9 +279,14 @@ function main(): void {
                 .map(informedEntity => informedEntity.Id)
                 .filter(id => id !== 0)
                 .join(','));
-            return filterToRelevantAlerts(serviceAndBannerAlerts);
+
+            return new GetAdvisoryResult(
+                filterToRelevantAlerts(response.Alerts.ServiceAlerts),
+                filterToRelevantAlerts(response.Alerts.BannerAlerts),
+                response.Alerts.Errored
+            );
         })
-        .then(convertAlertsToPosts)
+        .then(convertAdvisoryResultToPosts)
         .then(posts => {
             if (posts.length > 0) {
                 logger.debug('posting all', posts.join(','));
@@ -270,6 +307,8 @@ function main(): void {
         .catch(e => {
             if (e instanceof Error) {
                 logger.error(e.message);
+                logger.error(e.cause);
+                logger.error(e.stack);
             } else {
                 logger.error(e);
             }

@@ -92,6 +92,24 @@ export type Translation = {
     'Language': string
 }
 
+export class GetAdvisoryResult {
+    public readonly serviceAlerts: ServiceAlert[];
+    public readonly bannerAlerts: ServiceAlert[];
+    public readonly errored: boolean;
+
+    constructor(serviceAlerts: ServiceAlert[], bannerAlerts: ServiceAlert[], errored: boolean) {
+        this.serviceAlerts = serviceAlerts;
+        this.bannerAlerts = bannerAlerts;
+        this.errored = errored;
+    }
+
+    public toString(): string {
+        const serviceAlertIdList = this.serviceAlerts.map(alert => alert.Id).join(',');
+        const bannerAlertIdList = this.bannerAlerts.map(alert => alert.Id).join(',');
+        return `{ GetAdvisoryResult: serviceAlerts [${serviceAlertIdList}] bannerAlerts [${bannerAlertIdList}] errored [${this.errored}] }`;
+    }
+}
+
 export class AdvisoryPost implements ContentComparable<AdvisoryPost> {
     public readonly id: string;
     public readonly message: string;
