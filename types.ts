@@ -43,6 +43,14 @@ export class Lines {
     }
 }
 
+export const FETCH_ERROR_RESPONSE = {
+    'Alerts': {
+        'ServiceAlerts': [],
+        'BannerAlerts': [],
+        'Errored': true
+    }
+}
+
 export type GetAdvisoriesResponse = {
     'Alerts': Alert // no, it's not an array despite the name
 }

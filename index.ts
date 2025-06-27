@@ -1,7 +1,7 @@
 import { AtpAgent, AtpSessionData, AtpSessionEvent } from "@atproto/api";
 import * as util from './general-util';
 import * as apiUtil from './api-object-util';
-import { AdvisoryPost, ContentEqualitySet, GetAdvisoriesResponse, GetAdvisoryResult, Line, Lines, ServiceAlert } from './types';
+import { AdvisoryPost, ContentEqualitySet, FETCH_ERROR_RESPONSE, GetAdvisoriesResponse, GetAdvisoryResult, Line, Lines, ServiceAlert } from './types';
 import { readFileSync } from "fs";
 
 const logger: util.Logger = new util.Logger(process.env.LOG_LEVEL ?? "debug");
@@ -86,9 +86,9 @@ const getServiceAdvisories = (): Promise<any> => {
             logger.debug('cf-cache-status', response.headers.get("cf-cache-status"), 'date', response.headers.get('date'));
             return response.json();
         })
-        .catch(error => {
+        .catch(e => {
             logger.error('failed to fetch advisories');
-            throw error;
+            return FETCH_ERROR_RESPONSE;
         });
 }
 
@@ -108,6 +108,7 @@ const filterToRelevantAlerts = (serviceAlerts: ServiceAlert[]): ServiceAlert[] =
             if (!keep) {
                 // don't have to check this alert again this run
                 knownPostedIds.add(serviceAlert.Id);
+                logger.info('marking rejected - does not affect our lines', serviceAlert.Id);
                 logger.debug('not posting: affected lines are not in lines to post', serviceAlert.Id);
             }
             return keep;
@@ -118,6 +119,7 @@ const filterToRelevantAlerts = (serviceAlerts: ServiceAlert[]): ServiceAlert[] =
             if (!keep) {
                 // don't have to check this alert again this run
                 knownPostedIds.add(serviceAlert.Id);
+                logger.info('marking rejected - no english header', serviceAlert.Id);
                 logger.debug('not posting: header empty', serviceAlert.Id);
             }
             return keep;
@@ -140,6 +142,7 @@ const filterToRelevantAlerts = (serviceAlerts: ServiceAlert[]): ServiceAlert[] =
             if (!keep) {
                 // if there's only one active period and we aren't in it, then we don't have to check this alert again this run
                 if (!serviceAlert.Alert.ActivePeriod || serviceAlert.Alert.ActivePeriod.length === 1) {
+                    logger.info('marking rejected - outside only active period', serviceAlert.Id);
                     knownPostedIds.add(serviceAlert.Id);
                 }
                 if (currentRunActivePeriod === undefined) {
