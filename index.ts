@@ -13,7 +13,7 @@ const linesToPost = (() => {
         process.env.LINES_TO_POST.split(',').forEach(lineId => {
             const resolvedLine = Lines.getLineById(lineId);
             if (resolvedLine) {
-                toPost.push(resolvedLine.externalId);
+                toPost.push(resolvedLine.id);
             }
         });
     }

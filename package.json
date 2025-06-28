@@ -1,6 +1,6 @@
 {
   "name": "@brdev/metrolink-ca-bsky-bot",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "description": "Monitor Metrolink CA service advisories and re-post them to Bluesky.",
   "main": "index.js",
   "scripts": {
