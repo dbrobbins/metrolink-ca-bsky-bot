@@ -1,3 +1,5 @@
+export const FIVE_MINUTES_MS = 300000;
+
 /**
  * @returns time adjusted to PT time zone
  */

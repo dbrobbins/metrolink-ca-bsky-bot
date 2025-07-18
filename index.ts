@@ -51,6 +51,7 @@ let loopCount = 0;
 let knownPostedIds = new Set<string>();
 let erroredCount = 0;
 let errored = false;
+let erroredDate: Date | null = null;
 
 const getAffectedLines = (serviceAlert: ServiceAlert): Line[] => {
     return serviceAlert.Alert.InformedEntity
@@ -196,20 +197,33 @@ const getPostsForAlert = (serviceAlert: ServiceAlert, postPrefix: string = ''): 
 const convertAdvisoryResultToPosts = (getAdvisoryResult: GetAdvisoryResult): AdvisoryPost[] => {
     const posts: AdvisoryPost[] = [];
 
-    // If the result state is now errored, handle that by forming a special post
-    // Also limit this post to 10 times in an instance cycle, just in case it flip flops more than expected
-    if (getAdvisoryResult.errored && !errored && erroredCount < 10) {
+    // If the result state is now errored but wasn't previously, take note so we can post a notice.
+    if (getAdvisoryResult.errored && !errored) {
+        logger.info('received errored response');
         errored = true;
-        erroredCount += 1;
-        posts.push(new AdvisoryPost(
-            `errorCount=${erroredCount}`,
-            '🤖 Per Metrolink, some service advisories may be temporarily unavailable. Posts will resume as soon as service is restored.'
-        ));
+        erroredDate = new Date();
     }
 
-    // We also need to remove our internal error state when things have returned to normal
+    // If the result state has cleared, clean up.
     if (!getAdvisoryResult.errored && errored) {
+        logger.info('cleared errored response');
         errored = false;
+        erroredDate = null;
+    }
+
+    // If we're in an active error state, then consider posting
+    if (getAdvisoryResult.errored && errored) {
+        // If it's been 5 minutes and we haven't posted too much, post a notice
+        if (erroredDate && erroredCount < 10 && util.msElapsedSince(erroredDate.getTime()) >= util.FIVE_MINUTES_MS) {
+            erroredCount += 1;
+            posts.push(new AdvisoryPost(
+                `errorCount=${erroredCount}`,
+                '🤖 Per Metrolink, some service advisories may be temporarily unavailable. Posts will resume as soon as service is restored.'
+            ));
+
+            // We still need to partially empty the error state so we won't just keep posting this
+            erroredDate = null;
+        }
     }
 
     return posts.concat(
